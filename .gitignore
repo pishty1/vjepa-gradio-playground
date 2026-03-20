@@ -2,3 +2,6 @@ vendor/vjepa2/
 skate_latents.pt
 skate_latents.npy
 skate_latents.metadata.json
+testvideo.mp4
+__pycache__/
+checkpoints
