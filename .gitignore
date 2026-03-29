@@ -5,3 +5,6 @@ skate_latents.metadata.json
 testvideo.mp4
 __pycache__/
 checkpoints
+*.mp4
+.sfdx
+.DS_Store
