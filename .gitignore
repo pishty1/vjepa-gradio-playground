@@ -1,6 +1,6 @@
 vendor/vjepa2/
-skate_latents.pt
-skate_latents.npy
+*.pt
+*.npy
 skate_latents.metadata.json
 testvideo.mp4
 __pycache__/
@@ -8,3 +8,4 @@ checkpoints
 *.mp4
 .sfdx
 .DS_Store
+*.metadata.json
