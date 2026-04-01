@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import sys
+import time
 import types
 import urllib.request
 from dataclasses import dataclass
@@ -52,8 +53,66 @@ def log_step(message: str) -> None:
     print(f"[vjepa2] {message}", file=sys.stderr, flush=True)
 
 
+def format_seconds(seconds: float) -> str:
+    return f"{float(seconds):.3f}s"
+
+
+def log_timing(label: str, seconds: float) -> None:
+    log_step(f"Timing · {label}: {format_seconds(seconds)}")
+
+
+def synchronize_device(device: torch.device | None) -> None:
+    if device is None:
+        return
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+    elif device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+        torch.mps.synchronize()
+
+
+def log_timing_summary(
+    title: str,
+    timings: dict[str, float],
+    total_seconds: float,
+    *,
+    min_seconds: float = 0.0,
+    max_entries: int | None = None,
+) -> None:
+    log_step(f"{title}:")
+    ranked = sorted(timings.items(), key=lambda item: item[1], reverse=True)
+    displayed = 0
+    for label, seconds in ranked:
+        if seconds < min_seconds:
+            continue
+        share = 0.0 if total_seconds <= 0.0 else (seconds / total_seconds) * 100.0
+        log_step(f"  - {label}: {format_seconds(seconds)} ({share:.1f}%)")
+        displayed += 1
+        if max_entries is not None and displayed >= max_entries:
+            break
+    subtotal_seconds = sum(timings.values())
+    overhead_seconds = max(0.0, total_seconds - subtotal_seconds)
+    if overhead_seconds >= min_seconds:
+        share = 0.0 if total_seconds <= 0.0 else (overhead_seconds / total_seconds) * 100.0
+        log_step(f"  - unaccounted overhead: {format_seconds(overhead_seconds)} ({share:.1f}%)")
+
+
 def bytes_to_mib(num_bytes: int) -> float:
     return float(num_bytes) / (1024.0 * 1024.0)
+
+
+def device_executes_asynchronously(device: torch.device | None) -> bool:
+    if device is None:
+        return False
+    if device.type == "cuda":
+        return torch.cuda.is_available()
+    if device.type == "mps":
+        return hasattr(torch, "mps") and hasattr(torch.mps, "synchronize")
+    return False
+
+
+def estimate_attention_scores_bytes(*, num_heads: int, token_count: int, dtype: torch.dtype) -> int:
+    element_size = torch.tensor([], dtype=dtype).element_size()
+    return int(num_heads) * int(token_count) * int(token_count) * int(element_size)
 
 
 def get_system_memory_bytes() -> int | None:
@@ -187,6 +246,7 @@ class ModelSpec:
     checkpoint_keys: tuple[str, ...]
     checkpoint_url: str
     embed_dim: int
+    num_heads: int
     native_resolution: int
 
 
@@ -198,6 +258,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         checkpoint_keys=("ema_encoder", "target_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitb_dist_vitG_384.pt",
         embed_dim=768,
+        num_heads=12,
         native_resolution=384,
     ),
     "vit_large_384": ModelSpec(
@@ -205,6 +266,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         checkpoint_keys=("ema_encoder", "target_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitl_dist_vitG_384.pt",
         embed_dim=1024,
+        num_heads=16,
         native_resolution=384,
     ),
     "vit_giant_384": ModelSpec(
@@ -212,6 +274,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         checkpoint_keys=("target_encoder", "ema_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitg_384.pt",
         embed_dim=1408,
+        num_heads=22,
         native_resolution=384,
     ),
     "vit_gigantic_384": ModelSpec(
@@ -219,6 +282,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         checkpoint_keys=("target_encoder", "ema_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitG_384.pt",
         embed_dim=1664,
+        num_heads=26,
         native_resolution=384,
     ),
 }
@@ -357,17 +421,26 @@ def load_encoder(
     checkpoint_path: Path,
     vendor_repo: Path,
     device: torch.device,
+    timings_out: dict[str, float] | None = None,
 ) -> torch.nn.Module:
     """Construct the upstream encoder and load the selected pretrained weights."""
 
+    load_encoder_start = time.perf_counter()
+
+    vendor_import_start = time.perf_counter()
     ensure_vendor_imports(vendor_repo)
+    vendor_import_seconds = time.perf_counter() - vendor_import_start
+
+    import_model_start = time.perf_counter()
     from app.vjepa_2_1.models import vision_transformer as vit_encoder
+    import_model_seconds = time.perf_counter() - import_model_start
 
     spec = MODEL_SPECS[model_name]
     log_step(f"Building encoder {model_name} for {num_frames} frames on {device}")
     # We instantiate the encoder at the checkpoint's native spatial resolution,
     # but RoPE interpolation in the upstream implementation lets us run on other
     # crop sizes such as 256 or 384 at inference time.
+    build_encoder_start = time.perf_counter()
     encoder = vit_encoder.__dict__[spec.arch_name](
         img_size=(spec.native_resolution, spec.native_resolution),
         patch_size=16,
@@ -382,20 +455,66 @@ def load_encoder(
         interpolate_rope=True,
         modality_embedding=True,
     )
+    build_encoder_seconds = time.perf_counter() - build_encoder_start
 
     log_step(f"Loading checkpoint weights from {checkpoint_path}")
+    load_checkpoint_start = time.perf_counter()
     checkpoint = load_checkpoint_file(checkpoint_path)
+    load_checkpoint_seconds = time.perf_counter() - load_checkpoint_start
+
+    resolve_key_start = time.perf_counter()
     checkpoint_key = resolve_checkpoint_key(checkpoint, spec.checkpoint_keys)
+    resolve_key_seconds = time.perf_counter() - resolve_key_start
     log_step(f"Using checkpoint key '{checkpoint_key}'")
+
+    clean_state_start = time.perf_counter()
     pretrained = clean_state_dict(checkpoint[checkpoint_key])
+    clean_state_seconds = time.perf_counter() - clean_state_start
+
+    load_state_dict_start = time.perf_counter()
     load_result = encoder.load_state_dict(pretrained, strict=True)
+    load_state_dict_seconds = time.perf_counter() - load_state_dict_start
     if load_result.missing_keys or load_result.unexpected_keys:
         raise RuntimeError(
             f"Checkpoint load mismatch. Missing={load_result.missing_keys}, unexpected={load_result.unexpected_keys}"
         )
 
+    move_encoder_start = time.perf_counter()
     encoder.eval().to(device)
+    synchronize_device(device)
+    move_encoder_seconds = time.perf_counter() - move_encoder_start
+
+    if timings_out is not None:
+        timings_out.clear()
+        timings_out.update(
+            {
+                "ensure_vendor_imports_seconds": vendor_import_seconds,
+                "import_model_module_seconds": import_model_seconds,
+                "build_encoder_module_seconds": build_encoder_seconds,
+                "load_checkpoint_file_seconds": load_checkpoint_seconds,
+                "resolve_checkpoint_key_seconds": resolve_key_seconds,
+                "clean_state_dict_seconds": clean_state_seconds,
+                "load_state_dict_seconds": load_state_dict_seconds,
+                "move_encoder_to_device_seconds": move_encoder_seconds,
+                "total_seconds": time.perf_counter() - load_encoder_start,
+            }
+        )
     return encoder
+
+
+def run_encoder_synchronously(
+    encoder: torch.nn.Module,
+    video_tensor: torch.Tensor,
+    device: torch.device,
+) -> tuple[torch.Tensor, float]:
+    """Run the encoder and measure end-to-end wall time, including async device completion."""
+
+    encoder_start = time.perf_counter()
+    with torch.inference_mode():
+        raw_tokens = encoder(video_tensor.to(device))
+        synchronize_device(device)
+    encoder_seconds = time.perf_counter() - encoder_start
+    return raw_tokens, encoder_seconds
 
 
 def probe_video(video_path: Path) -> dict[str, Any]:
@@ -548,9 +667,33 @@ def reshape_patch_tokens(
 ) -> tuple[torch.Tensor, int]:
     """Rebuild the spatiotemporal patch grid from the flat token sequence."""
 
+    latent_grid, stripped, _ = reshape_patch_tokens_with_timings(
+        patch_tokens,
+        time_patches=time_patches,
+        height_patches=height_patches,
+        width_patches=width_patches,
+        strip_leading_tokens=strip_leading_tokens,
+    )
+    return latent_grid, stripped
+
+
+def reshape_patch_tokens_with_timings(
+    patch_tokens: torch.Tensor,
+    *,
+    time_patches: int,
+    height_patches: int,
+    width_patches: int,
+    strip_leading_tokens: int | None = None,
+) -> tuple[torch.Tensor, int, dict[str, float]]:
+    """Rebuild the latent grid and report timings for the main reshape sub-steps."""
+
+    timings: dict[str, float] = {}
+    reshape_start = time.perf_counter()
+
     expected_patches = time_patches * height_patches * width_patches
     token_count = patch_tokens.shape[1]
 
+    auto_detect_start = time.perf_counter()
     if strip_leading_tokens is None:
         # Some ViT variants prepend a special token. The V-JEPA 2.1 encoder used
         # here usually does not, but we detect the off-by-one case automatically.
@@ -563,7 +706,9 @@ def reshape_patch_tokens(
                 f"Token count {token_count} does not match expected patch count {expected_patches} "
                 "and is not off by a single leading token."
             )
+    timings["auto_detect_leading_tokens_seconds"] = time.perf_counter() - auto_detect_start
 
+    validate_start = time.perf_counter()
     if strip_leading_tokens < 0:
         raise ValueError("strip_leading_tokens must be >= 0")
     if token_count - strip_leading_tokens != expected_patches:
@@ -571,10 +716,14 @@ def reshape_patch_tokens(
             f"After stripping {strip_leading_tokens} tokens, got {token_count - strip_leading_tokens} patches "
             f"but expected {expected_patches}."
         )
+    timings["validate_patch_token_count_seconds"] = time.perf_counter() - validate_start
 
+    strip_start = time.perf_counter()
     patch_tokens = patch_tokens[:, strip_leading_tokens:, :]
+    timings["strip_leading_tokens_seconds"] = time.perf_counter() - strip_start
     # The flat token order from the encoder is time-major patch order, so we can
     # reconstruct the latent video grid directly with einops.
+    rearrange_start = time.perf_counter()
     latent_grid = einops.rearrange(
         patch_tokens,
         "b (t h w) d -> b t h w d",
@@ -582,7 +731,9 @@ def reshape_patch_tokens(
         h=height_patches,
         w=width_patches,
     )
-    return latent_grid, strip_leading_tokens
+    timings["rearrange_to_latent_grid_seconds"] = time.perf_counter() - rearrange_start
+    timings["total_seconds"] = time.perf_counter() - reshape_start
+    return latent_grid, strip_leading_tokens, timings
 
 
 def save_outputs(
@@ -591,8 +742,11 @@ def save_outputs(
     output_prefix: Path,
     metadata: dict[str, Any],
     save_pt: bool = True,
+    timings_out: dict[str, float] | None = None,
 ) -> dict[str, Path]:
     """Persist the latent grid in both PyTorch and NumPy-friendly formats."""
+
+    serialization_start = time.perf_counter()
 
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
     npy_path = output_prefix.with_suffix(".npy")
@@ -607,12 +761,24 @@ def save_outputs(
         "Preparing latent grid for serialization: "
         f"shape={latent_shape}, dtype={latent_dtype}, device={latent_device}, size={total_bytes / (1024 * 1024):.1f} MiB"
     )
+    timings = metadata.setdefault("timings", {})
+    output_timings = timings.setdefault("output_serialization", {})
+
     log_step("Copying latent grid to CPU memory")
+    copy_start = time.perf_counter()
     latent_grid_cpu = latent_grid.detach().to("cpu")
+    output_timings["copy_latent_grid_to_cpu_seconds"] = time.perf_counter() - copy_start
+
     log_step(f"Writing NumPy latent grid to {npy_path}")
+    numpy_start = time.perf_counter()
     np.save(npy_path, latent_grid_cpu.numpy())
+    output_timings["write_numpy_latent_grid_seconds"] = time.perf_counter() - numpy_start
+
     log_step(f"Writing metadata to {metadata_path}")
-    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    metadata_json = json.dumps(metadata, indent=2)
+    metadata_start = time.perf_counter()
+    metadata_path.write_text(metadata_json, encoding="utf-8")
+    output_timings["write_metadata_seconds"] = time.perf_counter() - metadata_start
 
     outputs = {
         "npy": npy_path,
@@ -621,8 +787,18 @@ def save_outputs(
     if save_pt:
         pt_path = output_prefix.with_suffix(".pt")
         log_step(f"Writing PyTorch tensor to {pt_path}")
+        torch_save_start = time.perf_counter()
         torch.save(latent_grid_cpu, pt_path)
+        output_timings["write_pytorch_tensor_seconds"] = time.perf_counter() - torch_save_start
         outputs["pt"] = pt_path
+
+    output_timings["total_seconds"] = time.perf_counter() - serialization_start
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    if timings_out is not None:
+        timings_out.clear()
+        timings_out.update(output_timings)
+
+    log_timing("output serialization total", output_timings["total_seconds"])
     log_step("Output serialization complete")
     return outputs
 
@@ -646,6 +822,9 @@ def extract_latents(
 ) -> dict[str, Any]:
     """Run the full latent-extraction pipeline for one video clip."""
 
+    extraction_start = time.perf_counter()
+    major_phase_timings: dict[str, float] = {}
+
     video_path = video_path.resolve()
     output_prefix = output_prefix.resolve()
     vendor_repo = vendor_repo.resolve()
@@ -660,11 +839,16 @@ def extract_latents(
 
     device = auto_device(device_name)
     log_step(f"Selected device: {device}")
+
+    probe_start = time.perf_counter()
     video_meta = probe_video(video_path)
+    major_phase_timings["probe video metadata"] = time.perf_counter() - probe_start
     log_step(
         f"Video metadata: {video_meta['frame_count']} frames at {video_meta['fps']:.3f} fps, "
         f"resolution {video_meta['width']}x{video_meta['height']}"
     )
+
+    frame_selection_start = time.perf_counter()
     frame_indices = select_frame_indices(
         video_fps=video_meta["fps"],
         frame_count=video_meta["frame_count"],
@@ -673,11 +857,18 @@ def extract_latents(
         start_second=start_second,
         sample_fps=sample_fps,
     )
+    major_phase_timings["select frame indices"] = time.perf_counter() - frame_selection_start
     log_step(f"Reading {len(frame_indices)} frames: {frame_indices[0]}..{frame_indices[-1]}")
+
+    decode_start = time.perf_counter()
     frames = read_video_frames(video_path, frame_indices)
+    major_phase_timings["decode video frames"] = time.perf_counter() - decode_start
     crop_height, crop_width = normalize_crop_size(crop_size)
     log_step(f"Preprocessing clip to {crop_height}x{crop_width}")
+
+    preprocess_start = time.perf_counter()
     video_tensor = preprocess_video(frames, crop_size=crop_size)
+    major_phase_timings["preprocess video clip"] = time.perf_counter() - preprocess_start
     input_shape = list(video_tensor.shape)
 
     _, _, input_time, input_height, input_width = video_tensor.shape
@@ -687,6 +878,17 @@ def extract_latents(
     width_patches = input_width // 16
     expected_patches = time_patches * height_patches * width_patches
     spec = MODEL_SPECS[model_name]
+    estimated_attention_scores_bytes = estimate_attention_scores_bytes(
+        num_heads=spec.num_heads,
+        token_count=expected_patches,
+        dtype=video_tensor.dtype,
+    )
+    if device.type == "mps":
+        log_step(
+            "MPS sequence summary: "
+            f"tokens={expected_patches} ({time_patches}x{height_patches}x{width_patches}), "
+            f"estimated attention scores={bytes_to_mib(estimated_attention_scores_bytes):.1f} MiB across {spec.num_heads} heads"
+        )
 
     if dry_run:
         log_step("Dry run complete")
@@ -708,26 +910,36 @@ def extract_latents(
             "tokens_stripped": stripped,
         }
 
+    checkpoint_resolution_start = time.perf_counter()
     resolved_checkpoint = download_checkpoint_if_needed(model_name, checkpoint_path, checkpoint_dir)
+    major_phase_timings["resolve checkpoint"] = time.perf_counter() - checkpoint_resolution_start
+
+    encoder_setup_timings: dict[str, float] = {}
     encoder = load_encoder(
         model_name=model_name,
         num_frames=num_frames,
         checkpoint_path=resolved_checkpoint,
         vendor_repo=vendor_repo,
         device=device,
+        timings_out=encoder_setup_timings,
     )
+    major_phase_timings["load encoder"] = encoder_setup_timings["total_seconds"]
+    log_timing("load encoder", encoder_setup_timings["total_seconds"])
 
-    log_step("Running encoder forward pass")
-    with torch.inference_mode():
-        raw_tokens = encoder(video_tensor.to(device))
+    log_step("Running encoder synchronously")
+    raw_tokens, encoder_forward_seconds = run_encoder_synchronously(encoder, video_tensor, device)
+    major_phase_timings["encoder run"] = encoder_forward_seconds
+    log_timing("encoder run", encoder_forward_seconds)
 
     log_step("Reshaping patch tokens into latent grid")
-    latent_grid, stripped = reshape_patch_tokens(
+    latent_grid, stripped, reshape_timings = reshape_patch_tokens_with_timings(
         raw_tokens,
         time_patches=time_patches,
         height_patches=height_patches,
         width_patches=width_patches,
     )
+    major_phase_timings["reshape patch tokens"] = reshape_timings["total_seconds"]
+    log_timing("reshape patch tokens into latent grid", reshape_timings["total_seconds"])
     raw_token_shape = list(raw_tokens.shape)
     latent_grid_shape = list(latent_grid.shape)
 
@@ -746,28 +958,82 @@ def extract_latents(
         "tubelet_size": 2,
         "crop_size": [crop_height, crop_width],
         "native_checkpoint_resolution": spec.native_resolution,
+        "timings": {
+            "encoder_forward_pass": {
+                "device_executes_asynchronously": device_executes_asynchronously(device),
+                "measured_synchronously": True,
+                "forward_run_seconds": encoder_forward_seconds,
+                "total_wall_seconds": encoder_forward_seconds,
+            },
+            "reshape_patch_tokens": reshape_timings,
+        },
         # Keep the key run facts next to the saved tensors so downstream notebook
         # analysis can recover how the clip was produced.
         "notes": [
             "V-JEPA 2.1 checkpoints are trained at 384 resolution.",
             "This extractor supports smaller inference crops such as 256 via RoPE-enabled variable-size inference.",
             "The PyTorch encoder in the official repo does not usually emit an extra modality token; stripping is automatic only if the token count is off by one.",
+            "On asynchronous devices such as Apple MPS, encoder enqueue time can be much smaller than the actual forward wall time because GPU work completes later at synchronization points.",
         ],
     }
     del encoder
     del video_tensor
     del frames
     del raw_tokens
+    cleanup_start = time.perf_counter()
     if device.type == "mps" and hasattr(torch.mps, "empty_cache"):
         torch.mps.empty_cache()
+        synchronize_device(device)
+    major_phase_timings["cleanup and cache clear"] = time.perf_counter() - cleanup_start
 
     log_step(f"Starting output serialization with prefix {output_prefix}")
+    output_serialization_timings: dict[str, float] = {}
     output_paths = save_outputs(
         latent_grid=latent_grid,
         output_prefix=output_prefix,
         metadata=metadata,
         save_pt=save_pt,
+        timings_out=output_serialization_timings,
     )
+    metadata["timings"]["output_serialization"] = output_serialization_timings
+    major_phase_timings["serialize outputs"] = output_serialization_timings["total_seconds"]
+
+    finalize_metadata_start = time.perf_counter()
+    metadata["timings"]["total_extraction_seconds"] = time.perf_counter() - extraction_start
+    metadata["timings"]["major_phases"] = major_phase_timings
+    metadata["timings"]["encoder_setup"] = encoder_setup_timings
+    metadata["timings"]["major_phase_subtotal_seconds"] = sum(major_phase_timings.values())
+    metadata["timings"]["major_phase_unaccounted_overhead_seconds"] = max(
+        0.0,
+        metadata["timings"]["total_extraction_seconds"] - metadata["timings"]["major_phase_subtotal_seconds"],
+    )
+    output_paths["metadata"].write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    finalize_metadata_seconds = time.perf_counter() - finalize_metadata_start
+    major_phase_timings["finalize metadata write"] = finalize_metadata_seconds
+    metadata["timings"]["major_phases"] = major_phase_timings
+    metadata["timings"]["major_phase_subtotal_seconds"] = sum(major_phase_timings.values())
+    metadata["timings"]["major_phase_unaccounted_overhead_seconds"] = max(
+        0.0,
+        metadata["timings"]["total_extraction_seconds"] - metadata["timings"]["major_phase_subtotal_seconds"],
+    )
+    output_paths["metadata"].write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    extraction_summary_timings = {
+        "encoder run": encoder_forward_seconds,
+        "decode video frames": major_phase_timings["decode video frames"],
+        "load encoder": major_phase_timings["load encoder"],
+        "preprocess video clip": major_phase_timings["preprocess video clip"],
+        "resolve checkpoint": major_phase_timings["resolve checkpoint"],
+        "serialize outputs": major_phase_timings["serialize outputs"],
+        "reshape patch tokens": major_phase_timings["reshape patch tokens"],
+    }
+    log_timing_summary(
+        "Extraction timing summary",
+        extraction_summary_timings,
+        metadata["timings"]["total_extraction_seconds"],
+        min_seconds=0.05,
+    )
+    log_timing("total extraction", metadata["timings"]["total_extraction_seconds"])
     log_step("Extraction complete")
 
     return {
@@ -778,6 +1044,7 @@ def extract_latents(
         "latent_shape": latent_grid_shape,
         "frame_indices": frame_indices,
         "tokens_stripped": stripped,
+        "timings": metadata["timings"],
         "outputs": {key: str(value) for key, value in output_paths.items()},
     }
 

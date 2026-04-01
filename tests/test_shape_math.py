@@ -1,3 +1,6 @@
+import contextlib
+import io
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -10,7 +13,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vjepa2_latents.extractor import MODEL_SPECS, auto_device, download_checkpoint_if_needed, estimate_extraction_requirements, normalize_crop_size, parse_crop_size, prepare_display_frames, resolve_checkpoint_key, reshape_patch_tokens, save_outputs, select_frame_indices
+from vjepa2_latents.extractor import MODEL_SPECS, auto_device, download_checkpoint_if_needed, estimate_extraction_requirements, log_timing_summary, normalize_crop_size, parse_crop_size, prepare_display_frames, resolve_checkpoint_key, reshape_patch_tokens, run_encoder_synchronously, save_outputs, select_frame_indices
 
 
 class ReshapePatchTokensTests(unittest.TestCase):
@@ -35,6 +38,25 @@ class ReshapePatchTokensTests(unittest.TestCase):
         )
         self.assertEqual(grid.shape, (1, 8, 16, 16, 1024))
         self.assertEqual(stripped, 1)
+
+    def test_timed_reshape_reports_substep_durations(self) -> None:
+        from vjepa2_latents.extractor import reshape_patch_tokens_with_timings
+
+        tokens = torch.randn(1, 8 * 16 * 16, 1024)
+        grid, stripped, timings = reshape_patch_tokens_with_timings(
+            tokens,
+            time_patches=8,
+            height_patches=16,
+            width_patches=16,
+        )
+
+        self.assertEqual(grid.shape, (1, 8, 16, 16, 1024))
+        self.assertEqual(stripped, 0)
+        self.assertIn("auto_detect_leading_tokens_seconds", timings)
+        self.assertIn("validate_patch_token_count_seconds", timings)
+        self.assertIn("strip_leading_tokens_seconds", timings)
+        self.assertIn("rearrange_to_latent_grid_seconds", timings)
+        self.assertIn("total_seconds", timings)
 
 
 class SelectFrameIndicesTests(unittest.TestCase):
@@ -174,6 +196,12 @@ class OutputSaveTests(unittest.TestCase):
             loaded = np.load(outputs["npy"])
             self.assertEqual(loaded.shape, (1, 5, 2, 3, 4))
             np.testing.assert_allclose(loaded, latent_grid.numpy())
+            metadata = json.loads(outputs["metadata"].read_text(encoding="utf-8"))
+            self.assertIn("timings", metadata)
+            self.assertIn("output_serialization", metadata["timings"])
+            self.assertIn("copy_latent_grid_to_cpu_seconds", metadata["timings"]["output_serialization"])
+            self.assertIn("write_numpy_latent_grid_seconds", metadata["timings"]["output_serialization"])
+            self.assertIn("write_metadata_seconds", metadata["timings"]["output_serialization"])
 
     def test_save_outputs_can_skip_pt_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -190,6 +218,66 @@ class OutputSaveTests(unittest.TestCase):
             self.assertTrue(output_prefix.with_suffix(".npy").exists())
             self.assertTrue(output_prefix.with_suffix(".metadata.json").exists())
             self.assertFalse(output_prefix.with_suffix(".pt").exists())
+            metadata = json.loads(outputs["metadata"].read_text(encoding="utf-8"))
+            self.assertNotIn("write_pytorch_tensor_seconds", metadata["timings"]["output_serialization"])
+
+    def test_save_outputs_logs_serialization_timings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_prefix = Path(temp_dir) / "latents"
+            latent_grid = torch.ones((1, 2, 3, 4, 5), dtype=torch.float32)
+            stderr_buffer = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr_buffer):
+                save_outputs(
+                    latent_grid=latent_grid,
+                    output_prefix=output_prefix,
+                    metadata={"ok": True},
+                    save_pt=False,
+                )
+
+            stderr_text = stderr_buffer.getvalue()
+            self.assertIn("Timing · output serialization total:", stderr_text)
+
+
+class TimingSummaryTests(unittest.TestCase):
+    def test_log_timing_summary_sorts_and_reports_overhead(self) -> None:
+        stderr_buffer = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr_buffer):
+            log_timing_summary(
+                "Extraction timing summary",
+                {
+                    "decode video frames": 2.0,
+                    "load encoder": 5.0,
+                    "serialize outputs": 1.0,
+                },
+                total_seconds=10.0,
+            )
+
+        stderr_text = stderr_buffer.getvalue()
+        self.assertIn("Extraction timing summary:", stderr_text)
+        load_index = stderr_text.index("load encoder: 5.000s")
+        decode_index = stderr_text.index("decode video frames: 2.000s")
+        serialize_index = stderr_text.index("serialize outputs: 1.000s")
+        self.assertLess(load_index, decode_index)
+        self.assertLess(decode_index, serialize_index)
+        self.assertIn("unaccounted overhead: 2.000s", stderr_text)
+
+
+class EncoderRunTimingTests(unittest.TestCase):
+    def test_run_encoder_synchronously_returns_tensor_and_duration(self) -> None:
+        encoder = mock.Mock(return_value=torch.ones((1, 4, 8), dtype=torch.float32))
+        video_tensor = torch.zeros((1, 3, 4, 16, 16), dtype=torch.float32)
+
+        tokens, encoder_seconds = run_encoder_synchronously(
+            encoder,
+            video_tensor,
+            torch.device("cpu"),
+        )
+
+        self.assertEqual(tokens.shape, (1, 4, 8))
+        self.assertGreaterEqual(encoder_seconds, 0.0)
+        encoder.assert_called_once()
 
 
 if __name__ == "__main__":

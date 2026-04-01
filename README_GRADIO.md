@@ -71,6 +71,8 @@ It was also extended to support the Gradio workflow more cleanly:
 
 - rectangular crops via `normalize_crop_size()` and `parse_crop_size()`
 - preflight memory and token estimates via `estimate_extraction_requirements()`
+- synchronous encoder wall-time measurement via `run_encoder_synchronously()`
+- per-stage timing capture for encoder setup, encoder run, latent reshaping, CPU copy, metadata write, and file writes
 - safer checkpoint validation and redownload logic
 - fallback checkpoint-key resolution across multiple checkpoint layouts
 - display-frame preprocessing that matches model crop behavior
@@ -89,8 +91,11 @@ Focused extractor and shape-utility coverage for:
 - model registry coverage for all exposed backbones
 - checkpoint-key fallback behavior
 - extraction preflight estimation
+- reshape sub-step timing capture
 - cached checkpoint redownload behavior
+- synchronous encoder-run timing helper
 - optional `.pt` skipping during output serialization
+- output serialization timing metadata and logging
 
 ### `tests/test_visualization.py`
 
@@ -272,6 +277,8 @@ Implemented so far:
 - aspect-ratio-preserving side-by-side rendering so the source video is no longer squashed
 - broader model exposure with `vit_base_384`, `vit_large_384`, `vit_giant_384`, and `vit_gigantic_384`
 - safer checkpoint handling through validation, fallback key lookup, and invalid-cache redownload
+- synchronous encoder execution timing so the reported encoder duration includes async device completion
+- extraction metadata that records encoder setup timings, major-phase timings, and output serialization timings
 - removal of the standalone latent-video panel from the UI so the side-by-side view is primary
 
 ## Artifact formats
@@ -305,6 +312,20 @@ Projection metadata includes:
 - latent grid shape
 - projection settings
 - optional latent prefix back-reference
+
+Latent metadata now also includes a `timings` block with:
+
+- encoder forward-pass wall time measured synchronously
+- encoder setup timings and extraction major-phase timings
+- reshape total time plus reshape sub-step timings
+- output serialization timings for CPU copy, NumPy write, metadata write, and optional `.pt` write
+
+The encoder timing payload now includes:
+
+- `device_executes_asynchronously`
+- `measured_synchronously`
+- `forward_run_seconds`
+- `total_wall_seconds`
 
 ### Render artifacts
 
@@ -426,10 +447,11 @@ Focused validation that matches the current changes:
 cd /Users/pishty/ws/vjepa2.1
 env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m pytest tests/test_visualization.py tests/test_shape_math.py -q
 env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m unittest -v tests.test_visualization tests.test_shape_math
+/Users/pishty/ws/vjepa2.1/.venv/bin/python -m unittest -v tests.test_shape_math
 /Users/pishty/ws/vjepa2.1/.venv/bin/python -c "from app import build_demo; demo = build_demo(); print(type(demo).__name__)"
 ```
 
-The stored test log in `.tmp/test_output.log` shows `28` focused tests passing for the original extractor and visualization coverage.
+The current focused extractor timing/unit test run passes `20` tests in `tests/test_shape_math.py`.
 
 The current test suite also includes mocked coverage for MLX reducer dispatch and the missing-dependency error path.
 

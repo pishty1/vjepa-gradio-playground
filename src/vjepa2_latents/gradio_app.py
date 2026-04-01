@@ -85,6 +85,79 @@ def _serialize_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, indent=2)
 
 
+def _round_ui_number(value: Any, digits: int = 3) -> Any:
+    if isinstance(value, float):
+        if value == 0.0:
+            return 0.0
+        if abs(value) < 0.01:
+            return round(value, 6)
+        return round(value, digits)
+    return value
+
+
+def _summarize_timings_for_ui(timings: dict[str, Any] | None) -> dict[str, Any]:
+    if not timings:
+        return {}
+
+    summary: dict[str, Any] = {}
+
+    encoder_forward = timings.get("encoder_forward_pass")
+    if isinstance(encoder_forward, dict):
+        summary["encoder_forward_pass"] = {
+            key: _round_ui_number(encoder_forward[key])
+            for key in (
+                "device_executes_asynchronously",
+                "measured_synchronously",
+                "forward_run_seconds",
+                "total_wall_seconds",
+            )
+            if key in encoder_forward
+        }
+
+    reshape_timings = timings.get("reshape_patch_tokens")
+    if isinstance(reshape_timings, dict) and "total_seconds" in reshape_timings:
+        summary["reshape_patch_tokens"] = {
+            "total_seconds": _round_ui_number(reshape_timings["total_seconds"])
+        }
+
+    output_timings = timings.get("output_serialization")
+    if isinstance(output_timings, dict) and "total_seconds" in output_timings:
+        summary["output_serialization"] = {
+            "total_seconds": _round_ui_number(output_timings["total_seconds"])
+        }
+
+    encoder_setup = timings.get("encoder_setup")
+    if isinstance(encoder_setup, dict) and "total_seconds" in encoder_setup:
+        summary["encoder_setup"] = {
+            "total_seconds": _round_ui_number(encoder_setup["total_seconds"])
+        }
+
+    major_phases = timings.get("major_phases")
+    if isinstance(major_phases, dict):
+        phase_summary = {
+            label: _round_ui_number(seconds)
+            for label, seconds in major_phases.items()
+            if isinstance(seconds, (int, float)) and float(seconds) >= 0.01
+        }
+        if phase_summary:
+            summary["major_phases"] = phase_summary
+
+    if "total_extraction_seconds" in timings:
+        summary["total_extraction_seconds"] = _round_ui_number(timings["total_extraction_seconds"])
+
+    return summary
+
+
+def _clean_latent_metadata_for_ui(metadata: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(metadata)
+    cleaned_timings = _summarize_timings_for_ui(cleaned.get("timings"))
+    if cleaned_timings:
+        cleaned["timings"] = cleaned_timings
+    else:
+        cleaned.pop("timings", None)
+    return cleaned
+
+
 def _load_latent_metadata(output_prefix: Path) -> dict[str, Any]:
     return json.loads(output_prefix.with_suffix(".metadata.json").read_text(encoding="utf-8"))
 
@@ -337,6 +410,7 @@ def extract_latents_step(
         "latent_npy_path": str(output_prefix.with_suffix(".npy")),
         "latent_metadata_path": str(output_prefix.with_suffix(".metadata.json")),
     }
+    payload["timings"] = _summarize_timings_for_ui(result.get("timings"))
     status = _format_extraction_status(result, output_prefix, model_name=model_name, video_path=local_video_path)
     latent_state = {"output_prefix": str(output_prefix), "session_dir": str(session_dir)}
     return (
@@ -387,7 +461,7 @@ def load_latents_step(
     latent_grid, metadata = load_saved_latents(output_prefix)
     summary = summarize_latents(latent_grid)
     payload = {
-        **metadata,
+        **_clean_latent_metadata_for_ui(metadata),
         "summary": summary,
         "latent_output_prefix": str(output_prefix),
     }
