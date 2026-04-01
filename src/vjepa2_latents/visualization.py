@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib
 import json
 import importlib.util
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -35,8 +37,137 @@ class ProjectionArtifacts:
     component_labels: tuple[str, ...]
 
 
+MLX_VIS_METHOD_SPECS: dict[str, dict[str, str]] = {
+    "umap_mlx": {"class_name": "UMAP", "display_name": "UMAP-MLX"},
+    "tsne_mlx": {"class_name": "TSNE", "display_name": "t-SNE-MLX"},
+    "pacmap_mlx": {"class_name": "PaCMAP", "display_name": "PaCMAP-MLX"},
+    "localmap_mlx": {"class_name": "LocalMAP", "display_name": "LocalMAP-MLX"},
+    "trimap_mlx": {"class_name": "TriMap", "display_name": "TriMap-MLX"},
+    "dreams_mlx": {"class_name": "DREAMS", "display_name": "DREAMS-MLX"},
+    "cne_mlx": {"class_name": "CNE", "display_name": "CNE-MLX"},
+    "mmae_mlx": {"class_name": "MMAE", "display_name": "MMAE-MLX"},
+}
+
+
 def has_umap_support() -> bool:
     return importlib.util.find_spec("umap.umap_") is not None
+
+
+def has_mlx_vis_support() -> bool:
+    return importlib.util.find_spec("mlx_vis") is not None
+
+
+def normalize_projection_method(method: str) -> str:
+    normalized = method.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "pca": "pca",
+        "umap": "umap",
+        "mlx_umap": "umap_mlx",
+        "umap_mlx": "umap_mlx",
+        "mlx_tsne": "tsne_mlx",
+        "tsne": "tsne_mlx",
+        "tsne_mlx": "tsne_mlx",
+        "mlx_pacmap": "pacmap_mlx",
+        "pacmap": "pacmap_mlx",
+        "pacmap_mlx": "pacmap_mlx",
+        "mlx_localmap": "localmap_mlx",
+        "localmap": "localmap_mlx",
+        "localmap_mlx": "localmap_mlx",
+        "mlx_trimap": "trimap_mlx",
+        "trimap": "trimap_mlx",
+        "trimap_mlx": "trimap_mlx",
+        "mlx_dreams": "dreams_mlx",
+        "dreams": "dreams_mlx",
+        "dreams_mlx": "dreams_mlx",
+        "mlx_cne": "cne_mlx",
+        "cne": "cne_mlx",
+        "cne_mlx": "cne_mlx",
+        "mlx_mmae": "mmae_mlx",
+        "mmae": "mmae_mlx",
+        "mmae_mlx": "mmae_mlx",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def projection_method_display_name(method: str) -> str:
+    reducer_name = normalize_projection_method(method)
+    if reducer_name == "pca":
+        return "PCA"
+    if reducer_name == "umap":
+        return "UMAP"
+    spec = MLX_VIS_METHOD_SPECS.get(reducer_name)
+    if spec is not None:
+        return spec["display_name"]
+    return method.strip() or "Projection"
+
+
+def _filtered_constructor_kwargs(constructor: Any, candidate_kwargs: dict[str, Any]) -> dict[str, Any]:
+    signature = inspect.signature(constructor)
+    accepts_var_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+    if accepts_var_kwargs:
+        return {key: value for key, value in candidate_kwargs.items() if value is not None}
+
+    accepted_names = {
+        name
+        for name, parameter in signature.parameters.items()
+        if name != "self"
+        and parameter.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+    }
+    return {
+        key: value
+        for key, value in candidate_kwargs.items()
+        if key in accepted_names and value is not None
+    }
+
+
+def compute_mlx_projection(
+    features: np.ndarray,
+    *,
+    method: str,
+    n_components: int = 3,
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    metric: str = "euclidean",
+    random_state: int | None = 42,
+) -> np.ndarray:
+    if not has_mlx_vis_support():
+        raise RuntimeError(
+            "This projection method requires the optional `mlx-vis` dependency. "
+            "Install it on Apple Silicon with `pip install mlx-vis` to enable MLX-accelerated reducers."
+        )
+
+    if features.ndim != 2:
+        raise ValueError(f"Expected 2D features array, got shape {features.shape}")
+    if n_components <= 0:
+        raise ValueError("n_components must be positive")
+    if features.shape[0] < 2:
+        raise ValueError("MLX projections require at least 2 samples")
+
+    reducer_name = normalize_projection_method(method)
+    spec = MLX_VIS_METHOD_SPECS.get(reducer_name)
+    if spec is None:
+        raise ValueError(f"Unknown MLX projection method: {method}")
+
+    mlx_vis = importlib.import_module("mlx_vis")
+    reducer_class = getattr(mlx_vis, spec["class_name"])
+    effective_neighbors = max(2, min(int(n_neighbors), features.shape[0] - 1))
+    constructor_kwargs = _filtered_constructor_kwargs(
+        reducer_class,
+        {
+            "n_components": int(n_components),
+            "n_neighbors": effective_neighbors,
+            "min_dist": float(min_dist),
+            "metric": metric,
+            "random_state": random_state,
+        },
+    )
+    reducer = reducer_class(**constructor_kwargs)
+    projection = reducer.fit_transform(features)
+    return np.asarray(projection, dtype=np.float32)
 
 
 def load_saved_latents(output_prefix: Path) -> tuple[np.ndarray, dict[str, Any]]:
@@ -120,7 +251,7 @@ def projection_component_labels(
     component_count: int,
     explained_variance: np.ndarray | None = None,
 ) -> list[str]:
-    reducer_name = method.strip().lower()
+    reducer_name = normalize_projection_method(method)
     if reducer_name == "pca":
         labels: list[str] = []
         for index in range(component_count):
@@ -129,7 +260,7 @@ def projection_component_labels(
             else:
                 labels.append(f"PC{index + 1}")
         return labels
-    prefix = reducer_name.upper()
+    prefix = projection_method_display_name(reducer_name).replace(" ", "")
     return [f"{prefix}{index + 1}" for index in range(component_count)]
 
 
@@ -144,15 +275,17 @@ def compute_projection_bundle(
     umap_random_state: int | None = 42,
 ) -> dict[str, Any]:
     features, coordinates = flatten_latent_grid(latent_grid)
-    reducer_name = method.strip().lower()
+    reducer_name = normalize_projection_method(method)
+    requested_components = max(2, int(n_components))
 
     if reducer_name == "pca":
-        projection, explained = compute_pca_projection(features, n_components=max(2, int(n_components)))
+        projection, explained = compute_pca_projection(features, n_components=requested_components)
         explained_list: list[float] | None = [float(value) for value in explained]
+        projection_backend = "numpy-svd"
     elif reducer_name == "umap":
         projection = compute_umap_projection(
             features,
-            n_components=max(2, int(n_components)),
+            n_components=requested_components,
             n_neighbors=umap_n_neighbors,
             min_dist=umap_min_dist,
             metric=umap_metric,
@@ -160,24 +293,42 @@ def compute_projection_bundle(
         )
         explained = None
         explained_list = None
+        projection_backend = "umap-learn"
+    elif reducer_name in MLX_VIS_METHOD_SPECS:
+        projection = compute_mlx_projection(
+            features,
+            method=reducer_name,
+            n_components=requested_components,
+            n_neighbors=umap_n_neighbors,
+            min_dist=umap_min_dist,
+            metric=umap_metric,
+            random_state=umap_random_state,
+        )
+        explained = None
+        explained_list = None
+        projection_backend = "mlx-vis"
     else:
         raise ValueError(f"Unknown projection method: {method}")
 
+    method_label = projection_method_display_name(reducer_name)
     component_labels = projection_component_labels(reducer_name, projection.shape[1], explained)
     return {
         "projection": projection,
         "coordinates": coordinates,
         "method": reducer_name,
+        "method_label": method_label,
         "latent_grid_shape": list(latent_grid.shape),
         "component_labels": component_labels,
         "explained_variance": explained_list,
         "settings": {
             "method": reducer_name,
+            "method_label": method_label,
             "n_components": int(projection.shape[1]),
             "umap_n_neighbors": int(umap_n_neighbors),
             "umap_min_dist": float(umap_min_dist),
             "umap_metric": umap_metric,
             "umap_random_state": umap_random_state,
+            "projection_backend": projection_backend,
         },
     }
 
@@ -304,7 +455,7 @@ def build_projection_figure_from_data(
         )
         figure = go.Figure(data=[trace])
         figure.update_layout(
-            title=f"Latent-space {method.strip().upper()} projection",
+            title=f"Latent-space {projection_method_display_name(method)} projection",
             scene={
                 "xaxis_title": selected_labels[0],
                 "yaxis_title": selected_labels[1],
@@ -332,7 +483,7 @@ def build_projection_figure_from_data(
     )
     figure = go.Figure(data=[trace])
     figure.update_layout(
-        title=f"Latent-space {method.strip().upper()} projection",
+        title=f"Latent-space {projection_method_display_name(method)} projection",
         xaxis_title=selected_labels[0],
         yaxis_title=selected_labels[1],
         margin={"l": 0, "r": 0, "t": 40, "b": 0},
@@ -586,7 +737,7 @@ def create_visualizations_from_projection(
     combined_frames = side_by_side_frames(
         source_frames,
         latent_frames,
-        right_label=f"Latent {method.strip().upper()} RGB ({rgb_label})",
+        right_label=f"Latent {projection_method_display_name(method)} RGB ({rgb_label})",
         panel_size=latent_frames.shape[1:3],
     )
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 import tempfile
@@ -15,10 +16,12 @@ from vjepa2_latents.visualization import (
     compute_projection_bundle,
     compute_pca_projection,
     compute_umap_projection,
+    compute_mlx_projection,
     has_umap_support,
     infer_latent_fps,
     latent_rgb_frames,
     load_saved_projection,
+    projection_method_display_name,
     projection_rgb_frames,
     save_projection_artifacts,
     side_by_side_frames,
@@ -69,6 +72,54 @@ class ProjectionArtifactTests(unittest.TestCase):
         self.assertEqual(coordinates.shape[1], 3)
         self.assertEqual(metadata["method"], "pca")
         self.assertEqual(len(metadata["component_labels"]), projection.shape[1])
+
+
+class MlxProjectionTests(unittest.TestCase):
+    def test_missing_mlx_vis_dependency_raises_clear_error(self) -> None:
+        features = np.random.default_rng(7).normal(size=(16, 8)).astype(np.float32)
+        with mock.patch("vjepa2_latents.visualization.has_mlx_vis_support", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "mlx-vis"):
+                compute_mlx_projection(features, method="umap_mlx", n_components=2)
+
+    def test_projection_bundle_supports_mocked_mlx_reducers(self) -> None:
+        latent_grid = np.random.default_rng(8).normal(size=(1, 2, 3, 4, 6)).astype(np.float32)
+
+        class FakeTSNE:
+            def __init__(self, n_components: int):
+                self.n_components = n_components
+
+            def fit_transform(self, features: np.ndarray) -> np.ndarray:
+                rows = features.shape[0]
+                return np.arange(rows * self.n_components, dtype=np.float32).reshape(rows, self.n_components)
+
+        fake_module = type("FakeMlxVis", (), {"TSNE": FakeTSNE})
+
+        with (
+            mock.patch("vjepa2_latents.visualization.has_mlx_vis_support", return_value=True),
+            mock.patch("vjepa2_latents.visualization.importlib.import_module", return_value=fake_module),
+        ):
+            bundle = compute_projection_bundle(
+                latent_grid,
+                method="TSNE-MLX",
+                n_components=2,
+                umap_n_neighbors=99,
+                umap_min_dist=0.25,
+                umap_metric="cosine",
+                umap_random_state=17,
+            )
+
+        self.assertEqual(bundle["method"], "tsne_mlx")
+        self.assertEqual(bundle["method_label"], "t-SNE-MLX")
+        self.assertEqual(bundle["projection"].shape, (24, 2))
+        self.assertEqual(bundle["settings"]["projection_backend"], "mlx-vis")
+        self.assertEqual(bundle["component_labels"], ["t-SNE-MLX1", "t-SNE-MLX2"])
+
+
+class ProjectionMethodNamingTests(unittest.TestCase):
+    def test_display_names_are_human_friendly(self) -> None:
+        self.assertEqual(projection_method_display_name("pca"), "PCA")
+        self.assertEqual(projection_method_display_name("UMAP-MLX"), "UMAP-MLX")
+        self.assertEqual(projection_method_display_name("TSNE-MLX"), "t-SNE-MLX")
 
 
 @unittest.skipIf(not has_umap_support(), "umap-learn not installed")

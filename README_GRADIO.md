@@ -11,7 +11,7 @@ It supports a staged workflow where each step can run independently:
 1. estimate whether an extraction configuration is likely to fit the selected device
 2. extract latents from a video
 3. load previously saved latent artifacts
-4. compute PCA or UMAP projections with custom parameters
+4. compute PCA, `umap-learn`, or `mlx-vis` projections with custom parameters
 5. load previously saved projection artifacts
 6. build a 2D or 3D interactive plot from chosen projection components
 7. generate RGB latent videos from any selected 3 projection components
@@ -39,7 +39,7 @@ Current responsibilities:
 - estimate extraction pressure before a run with `estimate_limits_step()`
 - run extraction independently from visualization
 - load saved latent `.npy` and `.metadata.json` artifacts
-- compute or load reusable PCA or UMAP projection artifacts
+- compute or load reusable PCA, `umap-learn`, or `mlx-vis` projection artifacts
 - update component selectors dynamically based on projected dimensionality
 - build 2D or 3D plots from arbitrary selected components
 - create RGB videos from arbitrary selected projected components
@@ -55,6 +55,7 @@ Current responsibilities:
 - flatten latent grids into feature rows and `(t, h, w)` coordinates
 - compute PCA projections with NumPy SVD
 - compute UMAP projections when `umap-learn` is available
+- compute Apple-Silicon `mlx-vis` projections when the optional dependency is installed
 - save and load reusable projection bundles
 - build Plotly figures from either latent tensors or saved projections
 - convert chosen projection components into RGB frames
@@ -95,7 +96,7 @@ Focused extractor and shape-utility coverage for:
 
 Focused visualization coverage for:
 
-- PCA and UMAP projection helpers
+- PCA, UMAP, and optional `mlx-vis` projection helpers
 - projection artifact round-tripping
 - 2D and 3D figure generation
 - RGB rendering from selected components
@@ -109,6 +110,7 @@ Relevant UI dependencies:
 - `gradio>=5.0`
 - `plotly>=5.18`
 - `umap-learn>=0.5`
+- `mlx-vis>=0.7` on Apple Silicon, with `mlx>=0.20.0`
 
 ## Architecture
 
@@ -184,12 +186,12 @@ Outputs:
 
 Inputs:
 
-- projection method: `PCA` or `UMAP`
+- projection method: `PCA`, `UMAP`, or `mlx-vis` reducers (`UMAP-MLX`, `t-SNE-MLX`, `PaCMAP-MLX`, `LocalMAP-MLX`, `TriMap-MLX`, `DREAMS-MLX`, `CNE-MLX`, `MMAE-MLX`)
 - projected component count
-- UMAP neighbors
+- neighbor count for `UMAP`, `UMAP-MLX`, `PaCMAP-MLX`, and `LocalMAP-MLX`
 - UMAP `min_dist`
-- UMAP metric
-- UMAP random state
+- distance metric
+- random state
 - optional projection prefix textbox
 
 Buttons:
@@ -205,9 +207,10 @@ Outputs:
 
 Behavior:
 
-- UMAP-specific controls are hidden unless `UMAP` is selected
+- neighbor / manifold controls are hidden unless a neighbor-tuned reducer is selected
 - component pickers are repopulated to match the saved or computed projection dimensionality
 - 3D plotting is disabled automatically when fewer than 3 components exist
+- MLX reducers raise a clear install hint when `mlx-vis` is not available
 
 ### 4. Build a plot from chosen projection components
 
@@ -256,6 +259,7 @@ Implemented so far:
 - reusable latent loading from saved files
 - reusable projection loading from saved projection artifacts
 - PCA and UMAP projection support with configurable reducer parameters
+- optional `mlx-vis` reducer support for Apple Silicon (`UMAP`, `t-SNE`, `PaCMAP`, `LocalMAP`, `TriMap`, `DREAMS`, `CNE`, `MMAE`)
 - projection artifact persistence via `.projection.npz` and `.projection.metadata.json`
 - arbitrary component selection for plotting
 - arbitrary 3-component selection for RGB video generation
@@ -295,6 +299,7 @@ Saved by the projection step:
 Projection metadata includes:
 
 - projection method
+- human-readable method label
 - component count
 - component labels
 - latent grid shape
@@ -320,6 +325,7 @@ That means the app can:
 - choose any valid 2 components for 2D
 - choose any valid 3 components for 3D
 - reuse PCA or UMAP results without recomputation
+- reuse saved `mlx-vis` projections without recomputation
 - label PCA axes with explained-variance percentages when available
 
 ### RGB rendering
@@ -328,11 +334,23 @@ RGB rendering is driven by `projection_rgb_frames()` and `create_visualizations_
 
 That means the app can:
 
-- use PCA or UMAP projections
+- use PCA, `umap-learn`, or `mlx-vis` projections
 - use more than 3 projected components overall
 - let the user choose any 3 projected components for RGB mapping
 - reuse a saved projection instead of recomputing it
 - write filenames that encode both method and component selection
+
+## `mlx-vis` integration notes
+
+The `mlx-vis` integration is additive.
+
+Current behavior:
+
+- saved projection artifacts use the same `.projection.npz` and `.projection.metadata.json` format across PCA, `umap-learn`, and `mlx-vis`
+- Plotly remains the interactive plotting layer for both 2D and 3D exploration
+- RGB latent videos still run through the existing latent-grid renderer, so any saved projection can drive the same side-by-side workflow
+- neighbor-count controls are reused for `UMAP-MLX`, `PaCMAP-MLX`, and `LocalMAP-MLX`
+- `TriMap-MLX`, `DREAMS-MLX`, `CNE-MLX`, and `MMAE-MLX` currently use their library defaults plus the selected component count
 
 ### Side-by-side rendering
 
@@ -368,7 +386,7 @@ Recommended next improvements, in priority order:
 4. cache projections for identical latent prefixes and reducer settings
 5. record timing and file-size metadata per stage
 6. add source-frame alignment and letterbox controls
-7. improve output encoding, optionally via `ffmpeg` when available
+7. experiment with `mlx-vis` GPU animation exports for point-cloud-only previews when a 2D embedding is selected
 8. add maintenance actions for `.gradio_outputs/`
 9. add more analysis views such as heatmaps or temporal trajectories
 
@@ -385,6 +403,7 @@ Recommended next improvements, in priority order:
 - plot step: `src/vjepa2_latents/gradio_app.py::build_plot_step`
 - render step: `src/vjepa2_latents/gradio_app.py::create_rgb_videos_step`
 - projection helpers: `src/vjepa2_latents/visualization.py::compute_projection_bundle`
+- optional MLX reducer helper: `src/vjepa2_latents/visualization.py::compute_mlx_projection`
 - saved projection loading: `src/vjepa2_latents/visualization.py::load_saved_projection`
 - plot builder from saved data: `src/vjepa2_latents/visualization.py::build_projection_figure_from_data`
 - RGB rendering from selected components: `src/vjepa2_latents/visualization.py::projection_rgb_frames`
@@ -410,7 +429,9 @@ env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m unittest -
 /Users/pishty/ws/vjepa2.1/.venv/bin/python -c "from app import build_demo; demo = build_demo(); print(type(demo).__name__)"
 ```
 
-The stored test log in `.tmp/test_output.log` shows `28` focused tests passing for the current extractor and visualization coverage.
+The stored test log in `.tmp/test_output.log` shows `28` focused tests passing for the original extractor and visualization coverage.
+
+The current test suite also includes mocked coverage for MLX reducer dispatch and the missing-dependency error path.
 
 ## Summary
 
@@ -420,7 +441,7 @@ It currently lets you:
 
 - estimate likely memory pressure before extraction
 - extract and reload latents
-- compute and reload PCA or UMAP projections
+- compute and reload PCA, `umap-learn`, or `mlx-vis` projections
 - choose arbitrary projection components for plots
 - choose arbitrary projection components for RGB rendering
 - create non-squashed side-by-side videos for source vs latent comparison

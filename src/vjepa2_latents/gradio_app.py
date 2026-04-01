@@ -14,8 +14,10 @@ from .visualization import (
     build_projection_figure_from_data,
     compute_projection_bundle,
     create_visualizations_from_projection,
+    has_mlx_vis_support,
     load_saved_latents,
     load_saved_projection,
+    projection_method_display_name,
     save_projection_artifacts,
     summarize_latents,
 )
@@ -38,6 +40,21 @@ MODEL_CHOICES = [
     (MODEL_LABELS.get(model_name, model_name), model_name)
     for model_name in sorted(MODEL_SPECS.keys())
 ]
+
+PROJECTION_METHOD_CHOICES = [
+    ("PCA", "PCA"),
+    ("UMAP (`umap-learn`)", "UMAP"),
+    ("UMAP (`mlx-vis`)", "UMAP-MLX"),
+    ("t-SNE (`mlx-vis`)", "TSNE-MLX"),
+    ("PaCMAP (`mlx-vis`)", "PaCMAP-MLX"),
+    ("LocalMAP (`mlx-vis`)", "LocalMAP-MLX"),
+    ("TriMap (`mlx-vis`)", "TriMap-MLX"),
+    ("DREAMS (`mlx-vis`)", "DREAMS-MLX"),
+    ("CNE (`mlx-vis`)", "CNE-MLX"),
+    ("MMAE (`mlx-vis`)", "MMAE-MLX"),
+]
+
+NEIGHBOR_TUNED_METHODS = {"umap", "umap_mlx", "pacmap_mlx", "localmap_mlx"}
 
 
 def _resolve_video_path(video_file: str | None) -> Path:
@@ -176,11 +193,14 @@ def _format_latent_status(output_prefix: Path, metadata: dict[str, Any], summary
 
 def _format_projection_status(output_prefix: Path, metadata: dict[str, Any]) -> str:
     labels = metadata.get("component_labels", [])
+    method_text = metadata.get("method_label") or projection_method_display_name(metadata["method"])
+    backend = metadata.get("settings", {}).get("projection_backend", "unknown")
     return "\n".join(
         [
             "## Projection ready",
             f"- prefix: `{output_prefix}`",
-            f"- method: `{metadata['method']}`",
+            f"- method: `{method_text}`",
+            f"- backend: `{backend}`",
             f"- components: `{metadata['settings']['n_components']}`",
             f"- labels: `{', '.join(labels)}`",
             "- next: build a plot and/or generate RGB videos from any 3 projected components.",
@@ -193,7 +213,7 @@ def _format_plot_status(method: str, component_indices: Sequence[int]) -> str:
     return "\n".join(
         [
             "## Plot updated",
-            f"- method: `{method}`",
+            f"- method: `{projection_method_display_name(method)}`",
             f"- plotted components: `{selection}`",
         ]
     )
@@ -204,7 +224,7 @@ def _format_render_status(method: str, rgb_components: Sequence[int], latent_vid
     return "\n".join(
         [
             "## RGB videos created",
-            f"- method: `{method}`",
+            f"- method: `{projection_method_display_name(method)}`",
             f"- RGB components: `{component_text}`",
             f"- latent video: `{latent_video_path}`",
             f"- side-by-side video: `{side_by_side_video_path}`",
@@ -389,7 +409,8 @@ def load_latents_step(
 
 
 def toggle_projection_controls(projection_method: str):
-    return gr.update(visible=projection_method.strip().lower() == "umap")
+    normalized = projection_method.strip().lower().replace("-", "_")
+    return gr.update(visible=normalized in NEIGHBOR_TUNED_METHODS)
 
 
 def compute_projection_step(
@@ -425,7 +446,10 @@ def compute_projection_step(
         umap_metric,
         umap_random_state,
     )
-    projection_bundle = compute_projection_bundle(latent_grid, **settings)
+    try:
+        projection_bundle = compute_projection_bundle(latent_grid, **settings)
+    except (RuntimeError, ValueError) as error:
+        raise gr.Error(str(error)) from error
     projection_output_prefix = latent_output_prefix.parent / f"projection_{settings['method']}_{projection_bundle['projection'].shape[1]}"
     artifacts = save_projection_artifacts(
         projection_output_prefix,
@@ -594,7 +618,12 @@ def create_rgb_videos_step(
 def build_demo() -> gr.Blocks:
     description = (
         "Run the V-JEPA 2.1 pipeline in independent stages: extract latents, load latent files, "
-        "compute PCA or UMAP projections, build plots, and generate RGB videos from any 3 projected components."
+        "compute PCA, `umap-learn`, or Apple-Silicon `mlx-vis` projections, build plots, and generate RGB videos from any 3 projected components."
+    )
+    mlx_note = (
+        "`mlx-vis` is available in this environment for Apple-Silicon-accelerated reducers."
+        if has_mlx_vis_support()
+        else "Install optional `mlx-vis` on Apple Silicon to enable the MLX-backed projection methods."
     )
 
     with gr.Blocks(title="V-JEPA 2.1 Latent Explorer") as demo:
@@ -642,17 +671,22 @@ def build_demo() -> gr.Blocks:
         gr.Markdown("## 3. Compute or load a projection")
         with gr.Row():
             with gr.Column():
-                projection_method_input = gr.Radio(["PCA", "UMAP"], value="PCA", label="Projection method")
+                projection_method_input = gr.Dropdown(choices=PROJECTION_METHOD_CHOICES, value="PCA", label="Projection method")
                 projection_components_input = gr.Slider(minimum=2, maximum=5, step=1, value=5, label="Projected components")
                 with gr.Group(visible=False) as umap_controls:
-                    umap_n_neighbors_input = gr.Slider(minimum=2, maximum=200, step=1, value=15, label="UMAP neighbors")
+                    umap_n_neighbors_input = gr.Slider(minimum=2, maximum=200, step=1, value=15, label="Neighbor count")
                     umap_min_dist_input = gr.Slider(minimum=0.0, maximum=0.99, step=0.01, value=0.1, label="UMAP min_dist")
                     umap_metric_input = gr.Dropdown(
                         choices=["euclidean", "cosine", "manhattan", "chebyshev", "correlation"],
                         value="euclidean",
-                        label="UMAP metric",
+                        label="Distance metric",
                     )
-                    umap_random_state_input = gr.Number(value=42, precision=0, label="UMAP random state")
+                    umap_random_state_input = gr.Number(value=42, precision=0, label="Random state")
+                    gr.Markdown(
+                        "These settings are used by `UMAP`, `UMAP-MLX`, `PaCMAP-MLX`, and `LocalMAP-MLX`. "
+                        "Other `mlx-vis` reducers currently use their library defaults plus the selected component count."
+                    )
+                gr.Markdown(mlx_note)
                 compute_projection_button = gr.Button("Compute projection")
             with gr.Column():
                 projection_prefix_input = gr.Textbox(label="Projection prefix (.projection.npz stem)")
