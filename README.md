@@ -11,6 +11,8 @@ The full end-to-end pipeline has been implemented and verified in this workspace
 - CLI entrypoint added in `extract_vjepa2_latents.py`
 - tests added in `tests/test_shape_math.py`
 - notebook inspector added in `inspectdata.ipynb`
+- Hugging Face / Gradio app added in `app.py`
+- notebook now includes UMAP projection and side-by-side video export
 - successful latent extraction completed for `testvideo.mp4`
 
 ## What the extractor does
@@ -34,6 +36,9 @@ Official V-JEPA 2.1 checkpoints are released at `384` resolution, not `256`. Thi
 - `src/vjepa2_latents/extractor.py`: extraction pipeline and model loading
 - `tests/test_shape_math.py`: unit tests for frame indexing and token reshaping
 - `inspectdata.ipynb`: notebook for summary stats and latent visualizations
+- `app.py`: Gradio entrypoint for a Hugging Face Spaces-style browser UI
+- `src/vjepa2_latents/gradio_app.py`: app wiring for upload, extraction, and visualization
+- `src/vjepa2_latents/visualization.py`: latent PCA plotting and RGB/side-by-side video rendering helpers
 - `vendor/vjepa2`: official upstream clone from `facebookresearch/vjepa2`
 - `checkpoints/`: cached checkpoints downloaded by the extractor
 
@@ -54,7 +59,15 @@ If you want to use the vendored repo directly as a package too, install it in ed
 python -m pip install -e vendor/vjepa2
 ```
 
-The local environment used during validation also includes `matplotlib` for notebook plotting.
+The local environment used during validation also includes `matplotlib`, `ipympl`, and `umap-learn` for notebook plotting and UMAP projections.
+
+If you want the full notebook feature set used in the current inspector, install those extras too:
+
+```zsh
+python -m pip install matplotlib ipympl umap-learn
+```
+
+For the browser UI / Hugging Face Spaces interface, install the app dependencies in `requirements.txt` as well. That file now includes `gradio` and `plotly`.
 
 ## Quick checks
 
@@ -117,6 +130,27 @@ python extract_vjepa2_latents.py \
   --device cpu
 ```
 
+## Browser UI
+
+The workspace now includes a simple Hugging Face Spaces-style interface built with `gradio`.
+
+It supports:
+
+- uploading a video or selecting the bundled `testvideo.mp4` example
+- running the existing V-JEPA 2.1 latent-extraction pipeline from the browser
+- rendering an interactive `Plotly` PCA view of the latent space
+- generating a latent RGB video from PCA-projected patch embeddings
+- generating a side-by-side comparison video of source frames and latent RGB frames
+- showing clear status updates and the saved run metadata
+
+Run it locally with:
+
+```zsh
+python app.py
+```
+
+Then open the local Gradio URL in your browser.
+
 ## Completed extraction result
 
 The default extraction has already been run successfully on `testvideo.mp4`.
@@ -158,6 +192,8 @@ It currently includes:
 - printing tensor shape, dtype, frame indices, and norm summary
 - plotting latent norm heatmaps over all `8` latent time steps
 - projecting the latent vectors into RGB using the first `3` principal components
+- projecting the latent vectors with `UMAP` and mapping those coordinates into RGB + intensity views
+- generating a labeled side-by-side comparison video between source frames and latent-space UMAP frames
 - plotting cosine-similarity maps against the center patch from latent frame `0`
 
 Observed notebook summary from the extracted tensor:
@@ -172,6 +208,13 @@ Observed notebook summary from the extracted tensor:
 
 Open the notebook in VS Code and run it interactively if you want to inspect or extend the views.
 
+Recent notebook-generated artifacts include:
+
+- `latent_space_pca_smooth_384.mp4`
+- `latent_space_side_by_side_384.mp4`
+- `latent_space_umap_384.mp4`
+- `latent_space_umap_side_by_side_384.mp4`
+
 ## Validation completed
 
 The following checks have already passed in this workspace:
@@ -181,9 +224,14 @@ The following checks have already passed in this workspace:
 - `python3 extract_vjepa2_latents.py --dry-run`
 - `python3 extract_vjepa2_latents.py --video testvideo.mp4 --output-prefix skate_latents --model vit_large_384`
 
+Focused checks for the browser UI can be run with:
+
+- `python3 -m unittest tests/test_shape_math.py tests/test_visualization.py`
+
 ## Notes and warnings
 
 - the first real extraction run may appear slow because checkpoint loading and the transformer forward pass are heavy
 - the extractor now prints `[vjepa2] ...` progress messages to make long-running stages visible
 - `timm` emits a deprecation warning from upstream imports; this does not block extraction
 - PyTorch emits a `sdp_kernel` future warning from upstream internals; this also does not block extraction
+- `umap-learn` may print an `n_jobs` warning when `random_state` is set; this does not block the notebook outputs
