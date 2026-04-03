@@ -28,6 +28,9 @@ VENDOR_REPO = ROOT / "vendor" / "vjepa2"
 CHECKPOINT_DIR = ROOT / "checkpoints"
 APP_OUTPUT_DIR = ROOT / ".gradio_outputs"
 DEFAULT_DEVICE = "mps" if platform.system() == "Darwin" else "auto"
+DEFAULT_MODEL_NAME = "vit_base_384"
+DEFAULT_CROP_HEIGHT = 384
+DEFAULT_CROP_WIDTH = 384
 
 MODEL_LABELS = {
     "vit_base_384": "ViT-B/16 · 80M · 384",
@@ -708,9 +711,9 @@ def build_demo() -> gr.Blocks:
         with gr.Row():
             video_input = gr.Video(label="Input video", sources=["upload"])
             with gr.Column():
-                model_input = gr.Dropdown(choices=MODEL_CHOICES, value="vit_large_384", label="Model")
-                crop_height_input = gr.Slider(minimum=256, maximum=768, step=128, value=256, label="Crop height")
-                crop_width_input = gr.Slider(minimum=256, maximum=768, step=128, value=256, label="Crop width")
+                model_input = gr.Dropdown(choices=MODEL_CHOICES, value=DEFAULT_MODEL_NAME, label="Model")
+                crop_height_input = gr.Slider(minimum=256, maximum=768, step=128, value=DEFAULT_CROP_HEIGHT, label="Crop height")
+                crop_width_input = gr.Slider(minimum=256, maximum=768, step=128, value=DEFAULT_CROP_WIDTH, label="Crop width")
                 frames_input = gr.Slider(minimum=4, maximum=64, step=2, value=16, label="Frames")
                 sample_fps_input = gr.Number(value=0, label="Sample FPS (0 = consecutive frames)")
                 start_second_input = gr.Number(value=0, label="Start second")
@@ -728,8 +731,10 @@ def build_demo() -> gr.Blocks:
         extraction_status_output = gr.Markdown()
         preflight_status_output = gr.Markdown()
         latent_prefix_input = gr.Textbox(label="Latent prefix (.npy / .metadata.json stem)")
-        extraction_metadata_output = gr.Code(label="Extraction metadata", language="json", value="{}")
-        preflight_metadata_output = gr.Code(label="System fit estimate", language="json", value="{}")
+        with gr.Accordion("Extraction metadata", open=False):
+            extraction_metadata_output = gr.Code(label="Extraction metadata", language="json", value="{}")
+        with gr.Accordion("System fit estimate", open=False):
+            preflight_metadata_output = gr.Code(label="System fit estimate", language="json", value="{}")
 
         gr.Markdown("## 2. Load latent space")
         with gr.Row():
@@ -737,7 +742,8 @@ def build_demo() -> gr.Blocks:
             latent_metadata_input = gr.File(label="Latent metadata (.json)", file_types=[".json"], type="filepath")
         load_latents_button = gr.Button("Load latents")
         latent_status_output = gr.Markdown()
-        latent_metadata_output = gr.Code(label="Latent summary", language="json", value="{}")
+        with gr.Accordion("Latent summary", open=False):
+            latent_metadata_output = gr.Code(label="Latent summary", language="json", value="{}")
 
         gr.Markdown("## 3. Compute or load a projection")
         with gr.Row():
@@ -764,7 +770,8 @@ def build_demo() -> gr.Blocks:
                 load_projection_button = gr.Button("Load saved projection")
 
         projection_status_output = gr.Markdown()
-        projection_metadata_output = gr.Code(label="Projection metadata", language="json", value="{}")
+        with gr.Accordion("Projection metadata", open=False):
+            projection_metadata_output = gr.Code(label="Projection metadata", language="json", value="{}")
 
         gr.Markdown("## 4. Build a plot from chosen projection components")
         with gr.Row():
@@ -786,7 +793,8 @@ def build_demo() -> gr.Blocks:
         create_rgb_button = gr.Button("Create RGB videos")
         render_status_output = gr.Markdown()
         side_by_side_output = gr.Video(label="Source vs latent side-by-side")
-        render_metadata_output = gr.Code(label="Render metadata", language="json", value="{}")
+        with gr.Accordion("Render metadata", open=False):
+            render_metadata_output = gr.Code(label="Render metadata", language="json", value="{}")
 
         projection_method_input.change(
             fn=toggle_projection_controls,

@@ -9,10 +9,22 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 
-from vjepa2_latents.gradio_app import _clean_latent_metadata_for_ui, _summarize_timings_for_ui, extract_latents_step
+from vjepa2_latents.gradio_app import (
+    DEFAULT_CROP_HEIGHT,
+    DEFAULT_CROP_WIDTH,
+    DEFAULT_MODEL_NAME,
+    _clean_latent_metadata_for_ui,
+    _summarize_timings_for_ui,
+    extract_latents_step,
+)
 
 
 class GradioMetadataCleanupTests(unittest.TestCase):
+    def test_gradio_defaults_prefer_base_model_and_384_crop(self) -> None:
+        self.assertEqual(DEFAULT_MODEL_NAME, "vit_base_384")
+        self.assertEqual(DEFAULT_CROP_HEIGHT, 384)
+        self.assertEqual(DEFAULT_CROP_WIDTH, 384)
+
     def test_summarize_timings_for_ui_keeps_only_high_value_fields(self) -> None:
         timings = {
             "encoder_forward_pass": {
