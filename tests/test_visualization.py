@@ -11,8 +11,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from vjepa2_latents.visualization import (
     _ensure_even_frame_size,
+    annotate_selected_patch,
     build_projection_figure,
     build_projection_figure_from_data,
+    cosine_similarity_volume,
     compute_projection_bundle,
     compute_pca_projection,
     compute_umap_projection,
@@ -21,9 +23,11 @@ from vjepa2_latents.visualization import (
     infer_latent_fps,
     latent_rgb_frames,
     load_saved_projection,
+    map_click_to_latent_token,
     projection_method_display_name,
     projection_rgb_frames,
     save_projection_artifacts,
+    similarity_heatmap_frames,
     side_by_side_frames,
 )
 
@@ -159,6 +163,47 @@ class LatentRgbFramesTests(unittest.TestCase):
         frames = projection_rgb_frames(bundle["projection"], latent_grid.shape, rgb_components=(1, 2, 4), upscale_factor=2)
         self.assertEqual(frames.shape, (2, 6, 8, 3))
         self.assertEqual(frames.dtype, np.uint8)
+
+
+class PatchSimilarityTests(unittest.TestCase):
+    def test_maps_click_to_latent_token_coordinates(self) -> None:
+        token_index = map_click_to_latent_token((95, 63), (64, 96, 3), (1, 2, 4, 6, 8))
+        self.assertEqual(token_index, (0, 3, 5))
+
+    def test_computes_cosine_similarity_volume(self) -> None:
+        latent_grid = np.array(
+            [[[[[1.0, 0.0], [0.0, 1.0]]], [[[1.0, 0.0], [-1.0, 0.0]]]]],
+            dtype=np.float32,
+        )
+
+        similarity = cosine_similarity_volume(latent_grid, (0, 0, 0))
+
+        self.assertEqual(similarity.shape, (2, 1, 2))
+        self.assertAlmostEqual(float(similarity[0, 0, 0]), 1.0)
+        self.assertAlmostEqual(float(similarity[0, 0, 1]), 0.0)
+        self.assertAlmostEqual(float(similarity[1, 0, 0]), 1.0)
+        self.assertAlmostEqual(float(similarity[1, 0, 1]), -1.0)
+
+    def test_builds_similarity_overlay_and_annotation(self) -> None:
+        source_frames = np.full((2, 32, 48, 3), 120, dtype=np.uint8)
+        similarity = np.array(
+            [
+                [[1.0, 0.0], [0.0, -1.0]],
+                [[0.5, 0.25], [-0.25, -0.5]],
+            ],
+            dtype=np.float32,
+        )
+
+        overlay = similarity_heatmap_frames(source_frames, similarity, alpha=0.5)
+        annotated = annotate_selected_patch(overlay[0], (0, 1, 1), (1, 2, 2, 2, 4))
+        hotspot_delta = np.abs(overlay[0, 4, 4].astype(np.int16) - source_frames[0, 4, 4].astype(np.int16)).sum()
+        background_delta = np.abs(overlay[0, 28, 44].astype(np.int16) - source_frames[0, 28, 44].astype(np.int16)).sum()
+
+        self.assertEqual(overlay.shape, source_frames.shape)
+        self.assertEqual(overlay.dtype, np.uint8)
+        self.assertGreater(hotspot_delta, background_delta)
+        self.assertEqual(annotated.shape, overlay[0].shape)
+        self.assertFalse(np.array_equal(annotated, overlay[0]))
 
 
 class SideBySideFramesTests(unittest.TestCase):

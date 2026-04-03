@@ -11,12 +11,16 @@ import gradio as gr
 
 from .extractor import MODEL_SPECS, estimate_extraction_requirements, extract_latents, probe_video, select_frame_indices
 from .visualization import (
+    annotate_selected_patch,
     build_projection_figure_from_data,
     compute_projection_bundle,
+    create_patch_similarity_video,
     create_visualizations_from_projection,
     has_mlx_vis_support,
+    load_aligned_source_frames,
     load_saved_latents,
     load_saved_projection,
+    map_click_to_latent_token,
     projection_method_display_name,
     save_projection_artifacts,
     summarize_latents,
@@ -315,6 +319,31 @@ def _format_render_status(
             f"- RGB components: `{component_text}`",
             f"- latent video: `{latent_video_path}`",
             f"- side-by-side video: `{side_by_side_video_path}`",
+        ]
+    )
+
+
+def _format_tracking_ready_status(latent_grid_shape: Sequence[int], display_fps: float) -> str:
+    _, time_steps, grid_h, grid_w, _ = [int(value) for value in latent_grid_shape]
+    return "\n".join(
+        [
+            "## Patch similarity ready",
+            "- first frame loaded: click any object or patch in the image to select a latent token.",
+            f"- latent token grid: `{time_steps} x {grid_h} x {grid_w}`",
+            f"- playback fps: `{display_fps:.3f}`",
+        ]
+    )
+
+
+def _format_tracking_result_status(token_index: Sequence[int], click_xy: Sequence[int], video_path: Path) -> str:
+    time_index, row_index, column_index = [int(value) for value in token_index]
+    click_x, click_y = [int(value) for value in click_xy[:2]]
+    return "\n".join(
+        [
+            "## Patch similarity video ready",
+            f"- selected click: `x={click_x}, y={click_y}`",
+            f"- selected latent token: `t={time_index}, h={row_index}, w={column_index}`",
+            f"- output video: `{video_path}`",
         ]
     )
 
@@ -757,6 +786,136 @@ def create_rgb_videos_step(
     return status, str(artifacts.side_by_side_video_path), _serialize_json(payload)
 
 
+def prepare_tracking_step(latent_state: dict[str, Any] | None):
+    if not latent_state or not latent_state.get("output_prefix"):
+        return (
+            None,
+            _format_hint_status("Patch similarity not ready", "Load latents first, then show the first frame for tracking."),
+            "{}",
+            None,
+            None,
+        )
+
+    latent_output_prefix = Path(latent_state["output_prefix"])
+    latent_grid = latent_state.get("latent_grid")
+    if latent_grid is None:
+        latent_grid, _ = load_saved_latents(latent_output_prefix)
+
+    metadata = latent_state.get("metadata")
+    if metadata is None:
+        metadata = _load_latent_metadata(latent_output_prefix)
+
+    try:
+        source_frames, display_fps = load_aligned_source_frames(metadata, latent_grid.shape)
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        raise gr.Error(str(error)) from error
+
+    payload = {
+        "latent_output_prefix": str(latent_output_prefix),
+        "video_path": metadata.get("video_path"),
+        "latent_grid_shape": list(latent_grid.shape),
+        "source_frame_shape": list(source_frames.shape),
+        "display_fps": display_fps,
+    }
+    tracking_state = {
+        "latent_output_prefix": str(latent_output_prefix),
+        "source_frames": source_frames,
+        "display_fps": display_fps,
+        "latent_grid_shape": list(latent_grid.shape),
+    }
+    return (
+        source_frames[0],
+        _format_tracking_ready_status(latent_grid.shape, display_fps),
+        _serialize_json(payload),
+        tracking_state,
+        None,
+    )
+
+
+def select_patch_similarity_step(
+    latent_state: dict[str, Any] | None,
+    tracking_state: dict[str, Any] | None,
+    evt: gr.SelectData,
+):
+    if evt is None or getattr(evt, "index", None) is None:
+        return (
+            None,
+            _format_hint_status("Patch similarity not ready", "Click inside the first frame to select a latent patch."),
+            None,
+            "{}",
+            tracking_state,
+        )
+    if not latent_state or not latent_state.get("output_prefix"):
+        return (
+            None,
+            _format_hint_status("Patch similarity not ready", "Load latents first, then show the first frame for tracking."),
+            None,
+            "{}",
+            tracking_state,
+        )
+
+    latent_output_prefix = Path(latent_state["output_prefix"])
+    latent_grid = latent_state.get("latent_grid")
+    if latent_grid is None:
+        latent_grid, _ = load_saved_latents(latent_output_prefix)
+
+    metadata = latent_state.get("metadata")
+    if metadata is None:
+        metadata = _load_latent_metadata(latent_output_prefix)
+
+    source_frames = None
+    if tracking_state and tracking_state.get("latent_output_prefix") == str(latent_output_prefix):
+        source_frames = tracking_state.get("source_frames")
+    if source_frames is None:
+        source_frames, display_fps = load_aligned_source_frames(metadata, latent_grid.shape)
+    else:
+        display_fps = float(tracking_state.get("display_fps", 0.0) or 0.0)
+
+    click_index = evt.index
+    if not isinstance(click_index, (tuple, list)) or len(click_index) < 2:
+        raise gr.Error("Image selection did not provide click coordinates.")
+    click_xy = (int(click_index[0]), int(click_index[1]))
+    token_index = map_click_to_latent_token(click_xy, source_frames[0].shape, latent_grid.shape, time_index=0)
+    preview_frame = annotate_selected_patch(source_frames[0], token_index, latent_grid.shape)
+
+    output_dir = latent_output_prefix.parent / "tracking"
+    artifacts = create_patch_similarity_video(
+        latent_grid=latent_grid,
+        metadata=metadata,
+        output_dir=output_dir,
+        token_index=token_index,
+        source_frames=source_frames,
+    )
+    payload = {
+        "latent_output_prefix": str(latent_output_prefix),
+        "click_xy": [int(click_xy[0]), int(click_xy[1])],
+        "selected_token": {
+            "t": int(token_index[0]),
+            "h": int(token_index[1]),
+            "w": int(token_index[2]),
+        },
+        "display_fps": artifacts.display_fps,
+        "similarity_video_path": str(artifacts.similarity_video_path),
+        "similarity_video_shape": list(artifacts.similarity_video_shape),
+        "similarity_range": [artifacts.similarity_min, artifacts.similarity_max],
+    }
+    next_tracking_state = {
+        "latent_output_prefix": str(latent_output_prefix),
+        "source_frames": source_frames,
+        "display_fps": display_fps if display_fps > 0 else artifacts.display_fps,
+        "latent_grid_shape": list(latent_grid.shape),
+        "selected_token": list(token_index),
+        "click_xy": list(click_xy),
+    }
+    return (
+        preview_frame,
+        _format_tracking_result_status(token_index, click_xy, artifacts.similarity_video_path),
+        str(artifacts.similarity_video_path),
+        _serialize_json(payload),
+        next_tracking_state,
+    )
+
+
 def build_demo() -> gr.Blocks:
     description = (
         "Run the V-JEPA 2.1 pipeline in independent stages: extract latents, load latent files, "
@@ -774,6 +933,7 @@ def build_demo() -> gr.Blocks:
 
         latent_state = gr.State(value=None)
         projection_state = gr.State(value=None)
+        tracking_state = gr.State(value=None)
 
         gr.Markdown("## 1. Extract latents from video")
         with gr.Row():
@@ -870,6 +1030,23 @@ def build_demo() -> gr.Blocks:
         side_by_side_output = gr.Video(label="Source vs latent side-by-side")
         with gr.Accordion("Render metadata", open=False):
             render_metadata_output = gr.Code(label="Render metadata", language="json", value="{}")
+
+        with gr.Tabs():
+            with gr.Tab("Patch Similarity / Dense Tracking"):
+                gr.Markdown(
+                    "Load latents first, then show the first frame and click a patch to compute cosine similarity against every latent token in the video."
+                )
+                prepare_tracking_button = gr.Button("Show first frame")
+                tracking_status_output = gr.Markdown(
+                    value=_format_hint_status(
+                        "Patch similarity not ready",
+                        "Load latents first, then show the first frame for tracking.",
+                    )
+                )
+                tracking_preview_output = gr.Image(label="First frame (click to choose a patch)", type="numpy")
+                tracking_video_output = gr.Video(label="Patch similarity heatmap video")
+                with gr.Accordion("Patch similarity metadata", open=False):
+                    tracking_metadata_output = gr.Code(label="Patch similarity metadata", language="json", value="{}")
 
         projection_method_input.change(
             fn=toggle_projection_controls,
@@ -999,6 +1176,30 @@ def build_demo() -> gr.Blocks:
                 upscale_factor_input,
             ],
             outputs=[render_status_output, side_by_side_output, render_metadata_output],
+        )
+
+        prepare_tracking_button.click(
+            fn=prepare_tracking_step,
+            inputs=[latent_state],
+            outputs=[
+                tracking_preview_output,
+                tracking_status_output,
+                tracking_metadata_output,
+                tracking_state,
+                tracking_video_output,
+            ],
+        )
+
+        tracking_preview_output.select(
+            fn=select_patch_similarity_step,
+            inputs=[latent_state, tracking_state],
+            outputs=[
+                tracking_preview_output,
+                tracking_status_output,
+                tracking_video_output,
+                tracking_metadata_output,
+                tracking_state,
+            ],
         )
 
     return demo

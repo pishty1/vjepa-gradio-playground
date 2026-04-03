@@ -19,6 +19,8 @@ from vjepa2_latents.gradio_app import (
     build_plot_step,
     create_rgb_videos_step,
     compute_projection_step,
+    prepare_tracking_step,
+    select_patch_similarity_step,
     _summarize_timings_for_ui,
     extract_latents_step,
     toggle_projection_controls,
@@ -230,6 +232,73 @@ class GradioMetadataCleanupTests(unittest.TestCase):
                 compute_projection_step(latent_state, "PCA", "spatial", 2, 15, 0.1, "euclidean", 42)
 
         self.assertEqual(bundle_mock.call_args.kwargs["pca_mode"], "spatial")
+
+    def test_prepare_tracking_step_returns_first_frame_and_state(self) -> None:
+        latent_state = {
+            "output_prefix": "/tmp/latents",
+            "latent_grid": np.zeros((1, 2, 4, 4, 3), dtype=np.float32),
+            "metadata": {
+                "video_path": "/tmp/example.mp4",
+                "frame_indices": [0, 2, 4, 6],
+                "video_metadata": {"fps": 24.0},
+                "tubelet_size": 2,
+                "crop_size": [384, 384],
+            },
+        }
+        source_frames = np.zeros((2, 48, 48, 3), dtype=np.uint8)
+
+        with patch("vjepa2_latents.gradio_app.load_aligned_source_frames", return_value=(source_frames, 6.0)):
+            preview, status, metadata_json, tracking_state, video_path = prepare_tracking_step(latent_state)
+
+        self.assertEqual(preview.shape, (48, 48, 3))
+        self.assertIn("Patch similarity ready", status)
+        self.assertIn('"display_fps": 6.0', metadata_json)
+        self.assertEqual(tracking_state["latent_output_prefix"], "/tmp/latents")
+        self.assertIsNone(video_path)
+
+    def test_select_patch_similarity_step_uses_cached_tracking_frames(self) -> None:
+        latent_state = {
+            "output_prefix": "/tmp/latents",
+            "latent_grid": np.zeros((1, 2, 4, 4, 3), dtype=np.float32),
+            "metadata": {
+                "video_path": "/tmp/example.mp4",
+                "frame_indices": [0, 2, 4, 6],
+                "video_metadata": {"fps": 24.0},
+                "tubelet_size": 2,
+                "crop_size": [384, 384],
+            },
+        }
+        tracking_state = {
+            "latent_output_prefix": "/tmp/latents",
+            "source_frames": np.zeros((2, 64, 64, 3), dtype=np.uint8),
+            "display_fps": 6.0,
+            "latent_grid_shape": [1, 2, 4, 4, 3],
+        }
+        artifacts = SimpleNamespace(
+            similarity_video_path=Path("/tmp/patch_similarity.mp4"),
+            similarity_video_shape=(2, 64, 64, 3),
+            display_fps=6.0,
+            token_index=(0, 1, 2),
+            similarity_min=-0.25,
+            similarity_max=1.0,
+        )
+
+        with (
+            patch("vjepa2_latents.gradio_app.load_aligned_source_frames", side_effect=AssertionError("cached frames should be reused")),
+            patch("vjepa2_latents.gradio_app.create_patch_similarity_video", return_value=artifacts) as create_mock,
+        ):
+            preview, status, video_path, metadata_json, next_state = select_patch_similarity_step(
+                latent_state,
+                tracking_state,
+                SimpleNamespace(index=(33, 17)),
+            )
+
+        self.assertEqual(create_mock.call_args.kwargs["token_index"], (0, 1, 2))
+        self.assertEqual(preview.shape, (64, 64, 3))
+        self.assertIn("Patch similarity video ready", status)
+        self.assertEqual(video_path, "/tmp/patch_similarity.mp4")
+        self.assertIn('"w": 2', metadata_json)
+        self.assertEqual(next_state["selected_token"], [0, 1, 2])
 
 
 if __name__ == "__main__":

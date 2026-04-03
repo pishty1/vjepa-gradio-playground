@@ -17,6 +17,7 @@ It supports a staged workflow where each step can run independently:
 6. build a 2D or 3D interactive plot from chosen projection components
 7. generate RGB latent videos from any selected 3 projection components
 8. generate a side-by-side source/latent comparison video
+9. click a patch in the first frame and render a cosine-similarity tracking heatmap over time
 
 ## Files
 
@@ -45,6 +46,9 @@ Current responsibilities:
 - update component selectors dynamically based on projected dimensionality
 - build 2D or 3D plots from arbitrary selected components
 - create RGB videos from arbitrary selected projected components
+- show a click-to-track first-frame preview for dense patch similarity
+- map first-frame click coordinates onto latent tokens at `t=0`
+- render cosine-similarity heatmaps over time as MP4 videos
 - keep the metadata-heavy outputs collapsed by default so the main controls stay uncluttered
 - return status and JSON metadata for each stage separately
 
@@ -63,6 +67,9 @@ Current responsibilities:
 - build Plotly figures from either latent tensors or saved projections
 - convert chosen projection components into RGB frames
 - compose side-by-side videos
+- map clicked image coordinates to latent token indices
+- compute token-to-token cosine similarity volumes
+- blend hotspot-focused similarity heatmaps back onto source frames and export them as MP4 videos
 - preserve aspect ratio in the side-by-side panels by padding instead of squashing
 - write browser-friendly `.mp4` outputs with `ffmpeg` using `libx264` and `yuv420p`
 
@@ -108,6 +115,7 @@ Focused visualization coverage for:
 - projection artifact round-tripping
 - 2D and 3D figure generation
 - RGB rendering from selected components
+- patch-similarity click mapping, cosine similarity, and heatmap overlays
 - side-by-side frame layout and aspect-ratio padding
 - even-dimension video padding helpers
 
@@ -134,12 +142,14 @@ browser UI
   -> compute_projection_step(...) or load_projection_step(...)
   -> build_plot_step(...)
   -> create_rgb_videos_step(...)
+  -> prepare_tracking_step(...)
+  -> select_patch_similarity_step(...)
   -> return stage-specific status + artifacts + metadata
 ```
 
 ## Current UI layout
 
-The app is built in `build_demo()` and split into 5 main sections, with a preflight estimate action inside the extraction section.
+The app is built in `build_demo()` and split into 6 main sections, with a preflight estimate action inside the extraction section.
 
 ### 1. Extract latents from video
 
@@ -259,6 +269,33 @@ Note:
 
 - the latent-only RGB video is still written to disk and reported in metadata, but the UI presents the side-by-side video as the main visual output
 
+### 6. Patch Similarity / Dense Tracking
+
+Inputs:
+
+- loaded latent state from the earlier extract/load stages
+- a click inside the first displayed source frame
+
+Buttons / interactions:
+
+- `Show first frame`
+- click directly on the first frame image to choose a patch/object
+
+Outputs:
+
+- first-frame preview with the selected latent patch outlined
+- patch-similarity status
+- heatmap-over-video `.mp4` showing cosine similarity for the selected token across all `(t, h, w)` positions
+- tracking metadata JSON, collapsed by default
+
+Behavior:
+
+- the first frame is decoded with the same resize-and-center-crop pipeline used for model input display
+- click coordinates are mapped to the latent token grid at `t=0`
+- the selected token is compared to every token in the latent grid with cosine similarity
+- similarity scores are normalized to emphasize the strongest positive responses and blended with per-pixel opacity so hotspots stand out clearly
+- each frame also marks the best-matching patch location, while the first frame keeps the originally selected patch outlined in a brighter accent color
+
 ## What changed in the current implementation
 
 The current workspace goes beyond the original one-button prototype.
@@ -275,6 +312,7 @@ Implemented so far:
 - arbitrary component selection for plotting
 - arbitrary 3-component selection for RGB video generation
 - separate render step for videos after a projection is available
+- click-driven dense tracking from a selected first-frame patch
 - preflight system-fit estimation before extraction
 - lazy UMAP usage through optional dependency detection
 - safer extraction status formatting that matches the real extractor return payload
@@ -346,6 +384,20 @@ Saved by the render step under a `renders/` directory beside the projection file
 
 These videos are encoded for direct browser playback with H.264 (`libx264`) and `yuv420p`.
 
+### Patch-similarity artifacts
+
+Saved by the tracking step under a `tracking/` directory beside the latent files:
+
+- `patch_similarity_t<t>-h<h>-w<w>.mp4`
+
+Tracking metadata includes:
+
+- clicked image coordinates
+- selected latent token indices
+- similarity value range
+- peak patch location per frame when rendered
+- rendered video path, shape, and playback FPS
+
 ## Visualization details
 
 ### Plotting
@@ -373,6 +425,19 @@ That means the app can:
 - let the user choose any 3 projected components for RGB mapping
 - reuse a saved projection instead of recomputing it
 - write filenames that encode both method and component selection
+
+### Patch similarity / dense tracking
+
+Patch similarity is driven by a clicked first-frame token.
+
+That means the app can:
+
+- let the user probe a specific object or region interactively
+- map that click into the latent token lattice at `t=0`
+- compare one selected token with every token in the clip using cosine similarity
+- visualize token affinity over time as a clearer hotspot-focused heatmap overlay
+- show the best-matching patch at each frame and the original selection on the first frame
+- approximate the paper-style non-parametric label-propagation intuition without fine-tuning
 
 ## `mlx-vis` integration notes
 
@@ -405,7 +470,7 @@ Known constraints in the current version:
 - only one video is processed at a time
 - projection loading is prefix-based rather than direct `.projection.npz` and metadata upload
 - `ffmpeg` must be available on the system, or `imageio-ffmpeg` must be installed so the app can find a compatible encoder
-- no explicit cleanup policy exists for old `.gradio_outputs/` runs
+- no explicit cleanup policy exists for old `.gradio_outputs/` runs or tracking videos
 - UMAP can still be slower than PCA for large latent sets
 - RGB videos are analytic visualizations, not reconstructions of the source video
 - the app waits for extraction to finish before returning final outputs
@@ -418,11 +483,12 @@ Recommended next improvements, in priority order:
 2. expose latent, projection, and render artifacts as downloadable files
 3. add optional stage chaining such as extract → load or project → plot
 4. cache projections for identical latent prefixes and reducer settings
-5. record timing and file-size metadata per stage
-6. add source-frame alignment and letterbox controls
-7. experiment with `mlx-vis` GPU animation exports for point-cloud-only previews when a 2D embedding is selected
-8. add maintenance actions for `.gradio_outputs/`
-9. add more analysis views such as heatmaps or temporal trajectories
+5. cache decoded tracking frames and rendered similarity videos by selected token
+6. record timing and file-size metadata per stage
+7. add source-frame alignment and letterbox controls
+8. experiment with `mlx-vis` GPU animation exports for point-cloud-only previews when a 2D embedding is selected
+9. add maintenance actions for `.gradio_outputs/`
+10. add more analysis views such as temporal trajectories or patch-neighborhood comparisons
 
 ## Quick code map
 
@@ -436,12 +502,17 @@ Recommended next improvements, in priority order:
 - projection loading step: `src/vjepa2_latents/gradio_app.py::load_projection_step`
 - plot step: `src/vjepa2_latents/gradio_app.py::build_plot_step`
 - render step: `src/vjepa2_latents/gradio_app.py::create_rgb_videos_step`
+- tracking preview step: `src/vjepa2_latents/gradio_app.py::prepare_tracking_step`
+- tracking click handler: `src/vjepa2_latents/gradio_app.py::select_patch_similarity_step`
 - projection helpers: `src/vjepa2_latents/visualization.py::compute_projection_bundle`
 - optional MLX reducer helper: `src/vjepa2_latents/visualization.py::compute_mlx_projection`
 - saved projection loading: `src/vjepa2_latents/visualization.py::load_saved_projection`
 - plot builder from saved data: `src/vjepa2_latents/visualization.py::build_projection_figure_from_data`
 - RGB rendering from selected components: `src/vjepa2_latents/visualization.py::projection_rgb_frames`
 - side-by-side media export: `src/vjepa2_latents/visualization.py::create_visualizations_from_projection`
+- click-to-token mapping: `src/vjepa2_latents/visualization.py::map_click_to_latent_token`
+- dense similarity computation: `src/vjepa2_latents/visualization.py::cosine_similarity_volume`
+- tracking video export: `src/vjepa2_latents/visualization.py::create_patch_similarity_video`
 - extractor preflight and crop helpers: `src/vjepa2_latents/extractor.py::estimate_extraction_requirements`, `normalize_crop_size`, `parse_crop_size`, `prepare_display_frames`
 
 ## Local usage
@@ -458,8 +529,8 @@ Focused validation that matches the current changes:
 
 ```zsh
 cd /Users/pishty/ws/vjepa2.1
-env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m pytest tests/test_visualization.py tests/test_shape_math.py -q
-env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m unittest -v tests.test_visualization tests.test_shape_math
+env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m pytest tests/test_gradio_app.py tests/test_visualization.py tests/test_shape_math.py -q
+env NUMBA_DISABLE_JIT=1 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m unittest -v tests.test_gradio_app tests.test_visualization tests.test_shape_math
 /Users/pishty/ws/vjepa2.1/.venv/bin/python -m unittest -v tests.test_shape_math
 /Users/pishty/ws/vjepa2.1/.venv/bin/python -c "from app import build_demo; demo = build_demo(); print(type(demo).__name__)"
 ```
@@ -480,5 +551,6 @@ It currently lets you:
 - choose arbitrary projection components for plots
 - choose arbitrary projection components for RGB rendering
 - create non-squashed side-by-side videos for source vs latent comparison
+- click a first-frame patch and inspect dense cosine-similarity tracking over time
 
 That makes it much easier to iterate on latent analysis without rerunning the whole pipeline each time.
