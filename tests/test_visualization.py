@@ -184,6 +184,30 @@ class VideoWriteHelpersTests(unittest.TestCase):
         padded = _ensure_even_frame_size(frames)
         self.assertEqual(padded.shape, (2, 12, 14, 3))
 
+    def test_write_video_uses_ffmpeg_h264_yuv420p(self) -> None:
+        frames = np.zeros((2, 10, 12, 3), dtype=np.uint8)
+
+        with mock.patch("vjepa2_latents.visualization._resolve_ffmpeg_executable", return_value="ffmpeg"):
+            with mock.patch("vjepa2_latents.visualization.subprocess.run") as run_mock:
+                run_mock.return_value = mock.Mock(returncode=0, stderr=b"")
+                output = _ensure_even_frame_size(frames)
+                self.assertEqual(output.shape, (2, 10, 12, 3))
+                from vjepa2_latents.visualization import write_video
+
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    video_path = Path(temp_dir) / "test.mp4"
+                    write_video(video_path, frames, fps=24)
+
+        args, kwargs = run_mock.call_args
+        command = args[0]
+        self.assertIn("ffmpeg", command[0])
+        self.assertIn("-c:v", command)
+        self.assertIn("libx264", command)
+        self.assertIn("-pix_fmt", command)
+        self.assertIn("yuv420p", command)
+        self.assertEqual(kwargs["check"], False)
+        self.assertEqual(kwargs["input"], frames.tobytes())
+
 
 if __name__ == "__main__":
     unittest.main()

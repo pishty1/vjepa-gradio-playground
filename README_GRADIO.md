@@ -35,7 +35,7 @@ Main application layer.
 Current responsibilities:
 
 - define the staged Gradio UI
-- keep latent state and projection state between button clicks
+- keep loaded latent grids and projections in `gr.State` between button clicks
 - estimate extraction pressure before a run with `estimate_limits_step()`
 - run extraction independently from visualization
 - load saved latent `.npy` and `.metadata.json` artifacts
@@ -43,6 +43,7 @@ Current responsibilities:
 - update component selectors dynamically based on projected dimensionality
 - build 2D or 3D plots from arbitrary selected components
 - create RGB videos from arbitrary selected projected components
+- keep the metadata-heavy outputs collapsed by default so the main controls stay uncluttered
 - return status and JSON metadata for each stage separately
 
 ### `src/vjepa2_latents/visualization.py`
@@ -61,7 +62,7 @@ Current responsibilities:
 - convert chosen projection components into RGB frames
 - compose side-by-side videos
 - preserve aspect ratio in the side-by-side panels by padding instead of squashing
-- write `.mp4` outputs with OpenCV
+- write browser-friendly `.mp4` outputs with `ffmpeg` using `libx264` and `yuv420p`
 
 ### `src/vjepa2_latents/extractor.py`
 
@@ -143,9 +144,9 @@ The app is built in `build_demo()` and split into 5 main sections, with a prefli
 Inputs:
 
 - input video upload
-- model dropdown
-- crop height
-- crop width
+- model dropdown, defaulting to `vit_base_384` / 80M
+- crop height, defaulting to `384`
+- crop width, defaulting to `384`
 - frame count
 - sample FPS
 - start second
@@ -161,8 +162,8 @@ Outputs:
 - extraction status markdown
 - preflight estimate markdown
 - latent prefix text field auto-filled with the saved stem
-- extraction metadata JSON
-- preflight estimate JSON
+- extraction metadata JSON, collapsed by default
+- preflight estimate JSON, collapsed by default
 
 Notes:
 
@@ -185,7 +186,7 @@ Button:
 Outputs:
 
 - latent summary status
-- latent summary JSON
+- latent summary JSON, collapsed by default
 
 ### 3. Compute or load a projection
 
@@ -207,7 +208,7 @@ Buttons:
 Outputs:
 
 - projection status
-- projection metadata JSON
+- projection metadata JSON, collapsed by default
 - dynamically updated component selectors for plotting and RGB rendering
 
 Behavior:
@@ -248,7 +249,7 @@ Button:
 Outputs:
 
 - side-by-side source/latent video
-- render metadata JSON
+- render metadata JSON, collapsed by default
 
 Note:
 
@@ -272,6 +273,8 @@ Implemented so far:
 - preflight system-fit estimation before extraction
 - lazy UMAP usage through optional dependency detection
 - safer extraction status formatting that matches the real extractor return payload
+- default extraction inputs now favor the 80M base model with `384 × 384` crops
+- metadata panels are collapsed by default to keep the UI focused on the workflow
 - rectangular crop support via separate crop height and crop width controls
 - source-side display preprocessing that matches the model crop before side-by-side rendering
 - aspect-ratio-preserving side-by-side rendering so the source video is no longer squashed
@@ -279,6 +282,8 @@ Implemented so far:
 - safer checkpoint handling through validation, fallback key lookup, and invalid-cache redownload
 - synchronous encoder execution timing so the reported encoder duration includes async device completion
 - extraction metadata that records encoder setup timings, major-phase timings, and output serialization timings
+- in-memory latent and projection state so plot/render tweaks avoid reloading from disk when possible
+- browser-native MP4 rendering through `ffmpeg` with `libx264` and `yuv420p`
 - removal of the standalone latent-video panel from the UI so the side-by-side view is primary
 
 ## Artifact formats
@@ -333,6 +338,8 @@ Saved by the render step under a `renders/` directory beside the projection file
 
 - `latent_<method>_rgb_c<r>-<g>-<b>.mp4`
 - `latent_<method>_side_by_side_c<r>-<g>-<b>.mp4`
+
+These videos are encoded for direct browser playback with H.264 (`libx264`) and `yuv420p`.
 
 ## Visualization details
 
@@ -391,7 +398,7 @@ Known constraints in the current version:
 
 - only one video is processed at a time
 - projection loading is prefix-based rather than direct `.projection.npz` and metadata upload
-- generated videos use OpenCV `mp4v`, so Gradio may still re-wrap some outputs for browser playback
+- `ffmpeg` must be available on the system, or `imageio-ffmpeg` must be installed so the app can find a compatible encoder
 - no explicit cleanup policy exists for old `.gradio_outputs/` runs
 - UMAP can still be slower than PCA for large latent sets
 - RGB videos are analytic visualizations, not reconstructions of the source video

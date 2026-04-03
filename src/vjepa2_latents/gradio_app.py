@@ -351,6 +351,19 @@ def _projection_state(output_prefix: Path, metadata: dict[str, Any]) -> dict[str
         "method": metadata["method"],
         "component_count": int(metadata["settings"]["n_components"]),
         "latent_output_prefix": metadata.get("latent_output_prefix"),
+        "projection": metadata.get("projection"),
+        "coordinates": metadata.get("coordinates"),
+        "metadata": metadata,
+    }
+
+
+def _latent_state(output_prefix: Path, latent_grid: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "output_prefix": str(output_prefix),
+        "session_dir": str(output_prefix.parent),
+        "latent_grid": latent_grid,
+        "metadata": metadata,
+        "summary": summarize_latents(latent_grid),
     }
 
 
@@ -411,8 +424,9 @@ def extract_latents_step(
         "latent_metadata_path": str(output_prefix.with_suffix(".metadata.json")),
     }
     payload["timings"] = _summarize_timings_for_ui(result.get("timings"))
+    latent_grid, metadata = load_saved_latents(output_prefix)
     status = _format_extraction_status(result, output_prefix, model_name=model_name, video_path=video_path)
-    latent_state = {"output_prefix": str(output_prefix), "session_dir": str(session_dir)}
+    latent_state = _latent_state(output_prefix, latent_grid, metadata)
     return (
         status,
         str(output_prefix),
@@ -466,7 +480,7 @@ def load_latents_step(
         "latent_output_prefix": str(output_prefix),
     }
     status = _format_latent_status(output_prefix, metadata, summary)
-    next_state = {"output_prefix": str(output_prefix), "session_dir": str(output_prefix.parent)}
+    next_state = _latent_state(output_prefix, latent_grid, metadata)
     return (
         status,
         str(output_prefix),
@@ -511,7 +525,9 @@ def compute_projection_step(
         )
 
     latent_output_prefix = Path(latent_state["output_prefix"])
-    latent_grid, _ = load_saved_latents(latent_output_prefix)
+    latent_grid = latent_state.get("latent_grid")
+    if latent_grid is None:
+        latent_grid, _ = load_saved_latents(latent_output_prefix)
     settings = _normalize_projection_settings(
         projection_method,
         projection_components,
@@ -530,20 +546,32 @@ def compute_projection_step(
         projection_bundle,
         latent_output_prefix=latent_output_prefix,
     )
-    _, _, metadata = load_saved_projection(projection_output_prefix)
-    payload = {
-        **metadata,
-        "projection_output_prefix": str(projection_output_prefix),
-        "projection_npz_path": str(artifacts.projection_path),
-        "projection_metadata_path": str(artifacts.metadata_path),
+    projection_metadata = {
+        key: value
+        for key, value in projection_bundle.items()
+        if key not in {"projection", "coordinates"}
     }
-    status = _format_projection_status(projection_output_prefix, metadata)
+    projection_metadata.update(
+        {
+            "projection_output_prefix": str(projection_output_prefix),
+            "projection_npz_path": str(artifacts.projection_path),
+            "projection_metadata_path": str(artifacts.metadata_path),
+        }
+    )
+    payload = {
+        **projection_metadata,
+    }
+    status = _format_projection_status(projection_output_prefix, projection_metadata)
     selector_updates = _component_selector_updates(artifacts.projection_shape[1])
     return (
         status,
         str(projection_output_prefix),
         _serialize_json(payload),
-        _projection_state(projection_output_prefix, metadata),
+        {
+            **_projection_state(projection_output_prefix, projection_metadata),
+            "projection": projection_bundle["projection"],
+            "coordinates": projection_bundle["coordinates"],
+        },
         *selector_updates,
         None,
         None,
@@ -569,7 +597,7 @@ def load_projection_step(
             *selector_updates,
         )
 
-    projection, _, metadata = load_saved_projection(output_prefix)
+    projection, coordinates, metadata = load_saved_projection(output_prefix)
     payload = {
         **metadata,
         "projection_output_prefix": str(output_prefix),
@@ -581,7 +609,12 @@ def load_projection_step(
         status,
         str(output_prefix),
         _serialize_json(payload),
-        _projection_state(output_prefix, metadata),
+        {
+            **_projection_state(output_prefix, metadata),
+            "projection": projection,
+            "coordinates": coordinates,
+            "metadata": metadata,
+        },
         *selector_updates,
     )
 
@@ -601,7 +634,11 @@ def build_plot_step(
     if not projection_state or not projection_state.get("output_prefix"):
         return None, _format_hint_status("Plot not ready", "Compute or load a projection before building a plot.")
 
-    projection, coordinates, metadata = load_saved_projection(Path(projection_state["output_prefix"]))
+    projection = projection_state.get("projection")
+    coordinates = projection_state.get("coordinates")
+    metadata = projection_state.get("metadata")
+    if projection is None or coordinates is None or metadata is None:
+        projection, coordinates, metadata = load_saved_projection(Path(projection_state["output_prefix"]))
     component_indices = [int(plot_x_component) - 1, int(plot_y_component) - 1]
     if int(plot_dimensions) == 3:
         if plot_z_component is None:
@@ -641,7 +678,10 @@ def create_rgb_videos_step(
         )
 
     projection_output_prefix = Path(projection_state["output_prefix"])
-    projection, _, projection_metadata = load_saved_projection(projection_output_prefix)
+    projection = projection_state.get("projection")
+    projection_metadata = projection_state.get("metadata")
+    if projection is None or projection_metadata is None:
+        projection, _, projection_metadata = load_saved_projection(projection_output_prefix)
     latent_output_prefix_text = None
     if latent_state and latent_state.get("output_prefix"):
         latent_output_prefix_text = latent_state["output_prefix"]
@@ -655,7 +695,11 @@ def create_rgb_videos_step(
         )
 
     latent_output_prefix = Path(latent_output_prefix_text)
-    latent_metadata = _load_latent_metadata(latent_output_prefix)
+    latent_metadata = None
+    if latent_state and latent_state.get("metadata") is not None:
+        latent_metadata = latent_state["metadata"]
+    if latent_metadata is None:
+        latent_metadata = _load_latent_metadata(latent_output_prefix)
     rgb_components = (int(rgb_r_component) - 1, int(rgb_g_component) - 1, int(rgb_b_component) - 1)
     output_dir = projection_output_prefix.parent / "renders"
     artifacts = create_visualizations_from_projection(

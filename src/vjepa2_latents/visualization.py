@@ -4,6 +4,8 @@ import importlib
 import json
 import importlib.util
 import inspect
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -663,25 +665,68 @@ def _ensure_even_frame_size(frames: np.ndarray) -> np.ndarray:
     )
 
 
+def _resolve_ffmpeg_executable() -> str:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        return ffmpeg_path
+
+    try:
+        imageio_ffmpeg = importlib.import_module("imageio_ffmpeg")
+    except ImportError as error:  # pragma: no cover - depends on local environment
+        raise RuntimeError(
+            "ffmpeg is required to write browser-compatible MP4 files. Install `ffmpeg` or `imageio-ffmpeg`."
+        ) from error
+
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 def write_video(video_path: Path, frames: np.ndarray, fps: float) -> Path:
     video_path = Path(video_path)
     video_path.parent.mkdir(parents=True, exist_ok=True)
     frames = _ensure_even_frame_size(frames)
     frame_height, frame_width = frames.shape[1:3]
-    writer = cv2.VideoWriter(
+    ffmpeg_path = _resolve_ffmpeg_executable()
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-vcodec",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{frame_width}x{frame_height}",
+        "-r",
+        str(float(fps)),
+        "-i",
+        "pipe:0",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
         str(video_path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        float(fps),
-        (frame_width, frame_height),
+    ]
+    completed = subprocess.run(
+        command,
+        input=np.ascontiguousarray(frames, dtype=np.uint8).tobytes(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
     )
-    if not writer.isOpened():
-        raise RuntimeError(f"Could not open video writer for {video_path}")
-
-    try:
-        for frame in frames:
-            writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-    finally:
-        writer.release()
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg failed to write {video_path}: {completed.stderr.decode('utf-8', errors='replace').strip()}"
+        )
     return video_path
 
 
