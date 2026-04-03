@@ -32,12 +32,13 @@ Thin launcher that:
 
 ### `src/vjepa2_latents/gradio_app.py`
 
-Main application layer.
+Main application layer and UI entrypoint.
 
 Current responsibilities:
 
 - define the staged Gradio UI
 - keep loaded latent grids and projections in `gr.State` between button clicks
+- wire the per-stage Gradio callbacks and return values
 - estimate extraction pressure before a run with `estimate_limits_step()`
 - run extraction independently from visualization
 - load saved latent `.npy` and `.metadata.json` artifacts
@@ -51,6 +52,20 @@ Current responsibilities:
 - render cosine-similarity heatmaps over time as MP4 videos
 - keep the metadata-heavy outputs collapsed by default so the main controls stay uncluttered
 - return status and JSON metadata for each stage separately
+- emit concise `[vjepa2]` console progress logs for the main Gradio stages
+
+### `src/vjepa2_latents/gradio_utils.py`
+
+Shared Gradio helper layer.
+
+Current responsibilities:
+
+- define the default video, model, crop, checkpoint, and output-directory constants
+- define the model and projection choice lists used by the UI
+- normalize file prefixes and projection settings
+- format the stage-by-stage status strings and metadata JSON
+- build the `gr.State` payloads for latents and projections
+- keep the small console logging helper used by the Gradio callbacks
 
 ### `src/vjepa2_latents/projection.py`
 
@@ -461,6 +476,7 @@ Recommended next improvements, in priority order:
 - render step: `src/vjepa2_latents/gradio_app.py::create_rgb_videos_step`
 - tracking preview step: `src/vjepa2_latents/gradio_app.py::prepare_tracking_step`
 - tracking click handler: `src/vjepa2_latents/gradio_app.py::select_patch_similarity_step`
+- shared Gradio helpers: `src/vjepa2_latents/gradio_utils.py`
 - projection helpers: `src/vjepa2_latents/projection.py::compute_projection_bundle`
 - optional MLX reducer helper: `src/vjepa2_latents/projection.py::compute_mlx_projection`
 - saved projection loading: `src/vjepa2_latents/projection.py::load_saved_projection`
