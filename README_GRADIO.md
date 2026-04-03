@@ -52,26 +52,42 @@ Current responsibilities:
 - keep the metadata-heavy outputs collapsed by default so the main controls stay uncluttered
 - return status and JSON metadata for each stage separately
 
-### `src/vjepa2_latents/visualization.py`
+### `src/vjepa2_latents/projection.py`
 
-Visualization and media helpers.
+Projection-specific helpers.
 
 Current responsibilities:
 
-- load saved latent artifacts
+- define the projection method registry and display-name normalization
+- detect optional `umap-learn` and `mlx-vis` support
 - flatten latent grids into feature rows and `(t, h, w)` coordinates
-- compute PCA projections with NumPy SVD
-- compute UMAP projections when `umap-learn` is available
-- compute Apple-Silicon `mlx-vis` projections when the optional dependency is installed
-- save and load reusable projection bundles
-- build Plotly figures from either latent tensors or saved projections
+- compute PCA, UMAP, and optional `mlx-vis` projections
+- persist reusable projection bundles and load them back from disk
+- summarize latent tensors for UI display
+
+### `src/vjepa2_latents/video.py`
+
+Plotting and media-rendering helpers.
+
+Current responsibilities:
+
+- build Plotly figures from latent tensors or saved projections
 - convert chosen projection components into RGB frames
-- compose side-by-side videos
+- compose side-by-side videos with aspect-ratio-aware padding
 - map clicked image coordinates to latent token indices
 - compute token-to-token cosine similarity volumes
-- blend hotspot-focused similarity heatmaps back onto source frames and export them as MP4 videos
-- preserve aspect ratio in the side-by-side panels by padding instead of squashing
-- write browser-friendly `.mp4` outputs with `ffmpeg` using `libx264` and `yuv420p`
+- blend hotspot-focused similarity heatmaps over source frames
+- export browser-friendly `.mp4` outputs with `ffmpeg`
+
+### `src/vjepa2_latents/visualization.py`
+
+Compatibility facade for the visualization helpers.
+
+Current responsibilities:
+
+- re-export the public visualization API for existing imports
+- keep the test-friendly compatibility hooks on the legacy module path
+- bridge the split implementation in `projection.py` and `video.py`
 
 ### `src/vjepa2_latents/extractor.py`
 
@@ -298,92 +314,30 @@ Behavior:
 - the selected token is compared to every token in the latent grid with cosine similarity
 - similarity scores are normalized to emphasize the strongest positive responses and blended with per-pixel opacity so hotspots stand out clearly
 - each frame also marks the best-matching patch location, while the first frame keeps the originally selected patch outlined in a brighter accent color
+- Gradio extraction calls `extract_latents(..., save_pt=False)`, so the UI path persists `.npy` and `.metadata.json` but skips `.pt`
 
-## What changed in the current implementation
+### 2. Load latent space
 
-The current workspace goes beyond the original one-button prototype.
+Inputs:
 
-Implemented so far:
+- latent prefix textbox
+- optional latent `.npy` upload
+- optional latent `.json` metadata upload
 
-- staged extraction, loading, projection, plotting, and rendering
-- reusable latent loading from saved files
-- reusable projection loading from saved projection artifacts
-- PCA and UMAP projection support with configurable reducer parameters
-- global, spatial-only, and temporal-only PCA modes
-- optional `mlx-vis` reducer support for Apple Silicon (`UMAP`, `t-SNE`, `PaCMAP`, `LocalMAP`, `TriMap`, `DREAMS`, `CNE`, `MMAE`)
-- projection artifact persistence via `.projection.npz` and `.projection.metadata.json`
-- arbitrary component selection for plotting
-- arbitrary 3-component selection for RGB video generation
-- separate render step for videos after a projection is available
-- click-driven dense tracking from a selected first-frame patch
-- preflight system-fit estimation before extraction
-- lazy UMAP usage through optional dependency detection
-- safer extraction status formatting that matches the real extractor return payload
-- default extraction inputs now favor the 80M base model with `384 × 384` crops
-- metadata panels are collapsed by default to keep the UI focused on the workflow
-- rectangular crop support via separate crop height and crop width controls
-- source-side display preprocessing that matches the model crop before side-by-side rendering
-- aspect-ratio-preserving side-by-side rendering so the source video is no longer squashed
-- broader model exposure with `vit_base_384`, `vit_large_384`, `vit_giant_384`, and `vit_gigantic_384`
-- safer checkpoint handling through validation, fallback key lookup, and invalid-cache redownload
-- synchronous encoder execution timing so the reported encoder duration includes async device completion
-- extraction metadata that records encoder setup timings, major-phase timings, and output serialization timings
-- in-memory latent and projection state so plot/render tweaks avoid reloading from disk when possible
-- browser-native MP4 rendering through `ffmpeg` with `libx264` and `yuv420p`
-- removal of the standalone latent-video panel from the UI so the side-by-side view is primary
+Button:
 
-## Artifact formats
+- `Load latents`
 
-### Latent artifacts
+Outputs:
 
-Extractor output format:
+- latent summary status
+- latent summary JSON, collapsed by default
 
-- `latents.npy`
-- `latents.metadata.json`
-- optionally `latents.pt` when `save_pt=True`
+### 3. Compute or load a projection
 
-In the Gradio extraction path specifically, the app currently saves:
+Inputs:
 
-- `latents.npy`
-- `latents.metadata.json`
-
-### Projection artifacts
-
-Saved by the projection step:
-
-- `projection_<method>_<components>.projection.npz`
-- `projection_<method>_<components>.projection.metadata.json`
-
-Projection metadata includes:
-
-- projection method
-- human-readable method label
-- component count
-- component labels
-- latent grid shape
-- projection settings
-- optional latent prefix back-reference
-
-Latent metadata now also includes a `timings` block with:
-
-- encoder forward-pass wall time measured synchronously
-- encoder setup timings and extraction major-phase timings
-- reshape total time plus reshape sub-step timings
-- output serialization timings for CPU copy, NumPy write, metadata write, and optional `.pt` write
-
-The encoder timing payload now includes:
-
-- `device_executes_asynchronously`
-- `measured_synchronously`
-- `forward_run_seconds`
-- `total_wall_seconds`
-
-### Render artifacts
-
-Saved by the render step under a `renders/` directory beside the projection files:
-
-- `latent_<method>_rgb_c<r>-<g>-<b>.mp4`
-- `latent_<method>_side_by_side_c<r>-<g>-<b>.mp4`
+- projection method: `PCA`, `UMAP`, or `mlx-vis` reducers (`UMAP-MLX`, `t-SNE-MLX`, `PaCMAP-MLX`, `LocalMAP-MLX`, `TriMap-MLX`, `DREAMS-MLX`, `CNE-MLX`, `MMAE-MLX`)
 
 These videos are encoded for direct browser playback with H.264 (`libx264`) and `yuv420p`.
 
@@ -507,15 +461,16 @@ Recommended next improvements, in priority order:
 - render step: `src/vjepa2_latents/gradio_app.py::create_rgb_videos_step`
 - tracking preview step: `src/vjepa2_latents/gradio_app.py::prepare_tracking_step`
 - tracking click handler: `src/vjepa2_latents/gradio_app.py::select_patch_similarity_step`
-- projection helpers: `src/vjepa2_latents/visualization.py::compute_projection_bundle`
-- optional MLX reducer helper: `src/vjepa2_latents/visualization.py::compute_mlx_projection`
-- saved projection loading: `src/vjepa2_latents/visualization.py::load_saved_projection`
-- plot builder from saved data: `src/vjepa2_latents/visualization.py::build_projection_figure_from_data`
-- RGB rendering from selected components: `src/vjepa2_latents/visualization.py::projection_rgb_frames`
-- side-by-side media export: `src/vjepa2_latents/visualization.py::create_visualizations_from_projection`
-- click-to-token mapping: `src/vjepa2_latents/visualization.py::map_click_to_latent_token`
-- dense similarity computation: `src/vjepa2_latents/visualization.py::cosine_similarity_volume`
-- tracking video export: `src/vjepa2_latents/visualization.py::create_patch_similarity_video`
+- projection helpers: `src/vjepa2_latents/projection.py::compute_projection_bundle`
+- optional MLX reducer helper: `src/vjepa2_latents/projection.py::compute_mlx_projection`
+- saved projection loading: `src/vjepa2_latents/projection.py::load_saved_projection`
+- projection summary helper: `src/vjepa2_latents/projection.py::summarize_latents`
+- plot builder from saved data: `src/vjepa2_latents/video.py::build_projection_figure_from_data`
+- RGB rendering from selected components: `src/vjepa2_latents/video.py::projection_rgb_frames`
+- side-by-side media export: `src/vjepa2_latents/video.py::create_visualizations_from_projection`
+- click-to-token mapping: `src/vjepa2_latents/video.py::map_click_to_latent_token`
+- dense similarity computation: `src/vjepa2_latents/video.py::cosine_similarity_volume`
+- tracking video export: `src/vjepa2_latents/video.py::create_patch_similarity_video`
 - extractor preflight and crop helpers: `src/vjepa2_latents/extractor.py::estimate_extraction_requirements`, `normalize_crop_size`, `parse_crop_size`, `prepare_display_frames`
 
 ## Local usage

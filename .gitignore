@@ -11,3 +11,5 @@ checkpoints
 *.metadata.json
 .gradio_outputs/
 .vscode
+.lsp
+.clj-kondo
