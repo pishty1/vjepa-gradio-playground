@@ -945,6 +945,7 @@ def extract_latents(
 
     metadata = {
         "video_path": str(video_path),
+        "video_name": video_path.name,
         "model": model_name,
         "device": str(device),
         "checkpoint_path": str(resolved_checkpoint),

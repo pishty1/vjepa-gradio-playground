@@ -364,15 +364,11 @@ def extract_latents_step(
 ):
     video_path = _resolve_video_path(video_file)
     session_dir = _create_session_dir("vjepa2-extract-")
-    local_video_path = session_dir / video_path.name
-    if video_path != local_video_path:
-        shutil.copy2(video_path, local_video_path)
-
     output_prefix = session_dir / "latents"
     progress(0.1, desc="Running V-JEPA encoder")
     try:
         result = extract_latents(
-            video_path=local_video_path,
+            video_path=video_path,
             output_prefix=output_prefix,
             vendor_repo=VENDOR_REPO,
             model_name=model_name,
@@ -405,13 +401,14 @@ def extract_latents_step(
     payload = {
         **result,
         "model": model_name,
-        "video_path": str(local_video_path),
+        "video_path": str(video_path),
+        "video_name": video_path.name,
         "latent_output_prefix": str(output_prefix),
         "latent_npy_path": str(output_prefix.with_suffix(".npy")),
         "latent_metadata_path": str(output_prefix.with_suffix(".metadata.json")),
     }
     payload["timings"] = _summarize_timings_for_ui(result.get("timings"))
-    status = _format_extraction_status(result, output_prefix, model_name=model_name, video_path=local_video_path)
+    status = _format_extraction_status(result, output_prefix, model_name=model_name, video_path=video_path)
     latent_state = {"output_prefix": str(output_prefix), "session_dir": str(session_dir)}
     return (
         status,

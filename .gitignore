@@ -10,3 +10,4 @@ checkpoints
 .DS_Store
 *.metadata.json
 .gradio_outputs/
+.vscode
