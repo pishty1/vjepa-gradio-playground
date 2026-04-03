@@ -274,16 +274,19 @@ Note:
 Inputs:
 
 - loaded latent state from the earlier extract/load stages
-- a click inside the first displayed source frame
+- a frame selector for choosing one of the available source frames
+- a click inside the selected source frame
 
 Buttons / interactions:
 
 - `Show first frame`
-- click directly on the first frame image to choose a patch/object
+- change the frame selector to inspect a different source frame
+- click directly on the selected frame image to choose a patch/object
 
 Outputs:
 
 - first-frame preview with the selected latent patch outlined
+- frame selector populated with the available source-frame choices
 - patch-similarity status
 - heatmap-over-video `.mp4` showing cosine similarity for the selected token across all `(t, h, w)` positions
 - tracking metadata JSON, collapsed by default
@@ -291,7 +294,7 @@ Outputs:
 Behavior:
 
 - the first frame is decoded with the same resize-and-center-crop pipeline used for model input display
-- click coordinates are mapped to the latent token grid at `t=0`
+- click coordinates are mapped to the latent token grid for the selected frame
 - the selected token is compared to every token in the latent grid with cosine similarity
 - similarity scores are normalized to emphasize the strongest positive responses and blended with per-pixel opacity so hotspots stand out clearly
 - each frame also marks the best-matching patch location, while the first frame keeps the originally selected patch outlined in a brighter accent color

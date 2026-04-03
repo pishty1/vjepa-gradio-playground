@@ -659,7 +659,7 @@ def infer_latent_fps(frame_indices: list[int], source_fps: float, tubelet_size: 
 def load_aligned_source_frames(
     metadata: dict[str, Any],
     latent_grid_shape: Sequence[int],
-) -> tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, float, list[int]]:
     latent_grid_shape_tuple = tuple(int(value) for value in latent_grid_shape)
     if len(latent_grid_shape_tuple) != 5:
         raise ValueError(f"Expected latent grid shape with 5 dimensions, got {latent_grid_shape}")
@@ -672,7 +672,7 @@ def load_aligned_source_frames(
     source_frames = read_video_frames(Path(metadata["video_path"]), source_frame_indices)
     crop_size = normalize_crop_size(metadata.get("crop_size", [latent_grid_shape_tuple[2] * 16, latent_grid_shape_tuple[3] * 16]))
     source_frames = prepare_display_frames(source_frames, crop_size)
-    return source_frames, latent_fps
+    return source_frames, latent_fps, source_frame_indices
 
 
 def map_click_to_latent_token(
@@ -975,7 +975,7 @@ def create_visualizations_from_projection(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     latent_grid_shape_tuple = tuple(int(value) for value in latent_grid_shape)
-    source_frames, latent_fps = load_aligned_source_frames(metadata, latent_grid_shape_tuple)
+    source_frames, latent_fps, _ = load_aligned_source_frames(metadata, latent_grid_shape_tuple)
     latent_frames = projection_rgb_frames(
         projection,
         latent_grid_shape_tuple,
@@ -1023,7 +1023,7 @@ def create_patch_similarity_video(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if source_frames is None:
-        source_frames, latent_fps = load_aligned_source_frames(metadata, latent_grid.shape)
+        source_frames, latent_fps, _ = load_aligned_source_frames(metadata, latent_grid.shape)
     else:
         latent_fps = infer_latent_fps(
             [int(index) for index in metadata["frame_indices"]],

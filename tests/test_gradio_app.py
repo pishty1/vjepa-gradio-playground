@@ -246,14 +246,19 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             },
         }
         source_frames = np.zeros((2, 48, 48, 3), dtype=np.uint8)
+        source_frames[1, :, :, :] = 99
 
-        with patch("vjepa2_latents.gradio_app.load_aligned_source_frames", return_value=(source_frames, 6.0)):
-            preview, status, metadata_json, tracking_state, video_path = prepare_tracking_step(latent_state)
+        with patch("vjepa2_latents.gradio_app.load_aligned_source_frames", return_value=(source_frames, 6.0, [12, 14])):
+            frame_update, preview, status, metadata_json, tracking_state, video_path = prepare_tracking_step(latent_state, 1)
 
+        self.assertEqual(frame_update["choices"], [("Frame 1 (video frame 12)", 0), ("Frame 2 (video frame 14)", 1)])
         self.assertEqual(preview.shape, (48, 48, 3))
+        self.assertTrue(np.all(preview == 99))
         self.assertIn("Patch similarity ready", status)
         self.assertIn('"display_fps": 6.0', metadata_json)
+        self.assertIn('"selected_frame_index": 1', metadata_json)
         self.assertEqual(tracking_state["latent_output_prefix"], "/tmp/latents")
+        self.assertEqual(tracking_state["selected_frame_index"], 1)
         self.assertIsNone(video_path)
 
     def test_select_patch_similarity_step_uses_cached_tracking_frames(self) -> None:
@@ -273,6 +278,8 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             "source_frames": np.zeros((2, 64, 64, 3), dtype=np.uint8),
             "display_fps": 6.0,
             "latent_grid_shape": [1, 2, 4, 4, 3],
+            "source_frame_indices": [12, 14],
+            "selected_frame_index": 1,
         }
         artifacts = SimpleNamespace(
             similarity_video_path=Path("/tmp/patch_similarity.mp4"),
@@ -293,12 +300,13 @@ class GradioMetadataCleanupTests(unittest.TestCase):
                 SimpleNamespace(index=(33, 17)),
             )
 
-        self.assertEqual(create_mock.call_args.kwargs["token_index"], (0, 1, 2))
+        self.assertEqual(create_mock.call_args.kwargs["token_index"], (1, 1, 2))
         self.assertEqual(preview.shape, (64, 64, 3))
         self.assertIn("Patch similarity video ready", status)
+        self.assertIn("tracked frame", status)
         self.assertEqual(video_path, "/tmp/patch_similarity.mp4")
         self.assertIn('"w": 2', metadata_json)
-        self.assertEqual(next_state["selected_token"], [0, 1, 2])
+        self.assertEqual(next_state["selected_token"], [1, 1, 2])
 
 
 if __name__ == "__main__":
