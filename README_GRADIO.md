@@ -12,6 +12,7 @@ It supports a staged workflow where each step can run independently:
 2. extract latents from a video
 3. load previously saved latent artifacts
 4. compute PCA, `umap-learn`, or `mlx-vis` projections with custom parameters
+  - PCA supports global, spatial-only, and temporal-only modes
 5. load previously saved projection artifacts
 6. build a 2D or 3D interactive plot from chosen projection components
 7. generate RGB latent videos from any selected 3 projection components
@@ -40,6 +41,7 @@ Current responsibilities:
 - run extraction independently from visualization
 - load saved latent `.npy` and `.metadata.json` artifacts
 - compute or load reusable PCA, `umap-learn`, or `mlx-vis` projection artifacts
+- support global, spatial-only, and temporal-only PCA modes
 - update component selectors dynamically based on projected dimensionality
 - build 2D or 3D plots from arbitrary selected components
 - create RGB videos from arbitrary selected projected components
@@ -193,6 +195,7 @@ Outputs:
 Inputs:
 
 - projection method: `PCA`, `UMAP`, or `mlx-vis` reducers (`UMAP-MLX`, `t-SNE-MLX`, `PaCMAP-MLX`, `LocalMAP-MLX`, `TriMap-MLX`, `DREAMS-MLX`, `CNE-MLX`, `MMAE-MLX`)
+- PCA mode: `Global PCA`, `Spatial-only PCA`, or `Temporal-only PCA`
 - projected component count
 - neighbor count for `UMAP`, `UMAP-MLX`, `PaCMAP-MLX`, and `LocalMAP-MLX`
 - UMAP `min_dist`
@@ -214,6 +217,7 @@ Outputs:
 Behavior:
 
 - neighbor / manifold controls are hidden unless a neighbor-tuned reducer is selected
+- PCA mode controls are hidden unless `PCA` is selected
 - component pickers are repopulated to match the saved or computed projection dimensionality
 - 3D plotting is disabled automatically when fewer than 3 components exist
 - MLX reducers raise a clear install hint when `mlx-vis` is not available
@@ -265,6 +269,7 @@ Implemented so far:
 - reusable latent loading from saved files
 - reusable projection loading from saved projection artifacts
 - PCA and UMAP projection support with configurable reducer parameters
+- global, spatial-only, and temporal-only PCA modes
 - optional `mlx-vis` reducer support for Apple Silicon (`UMAP`, `t-SNE`, `PaCMAP`, `LocalMAP`, `TriMap`, `DREAMS`, `CNE`, `MMAE`)
 - projection artifact persistence via `.projection.npz` and `.projection.metadata.json`
 - arbitrary component selection for plotting
@@ -355,6 +360,7 @@ That means the app can:
 - reuse PCA or UMAP results without recomputation
 - reuse saved `mlx-vis` projections without recomputation
 - label PCA axes with explained-variance percentages when available
+- isolate static structure with spatial-only PCA or motion signatures with temporal-only PCA
 
 ### RGB rendering
 

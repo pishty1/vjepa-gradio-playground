@@ -18,8 +18,10 @@ from vjepa2_latents.gradio_app import (
     _clean_latent_metadata_for_ui,
     build_plot_step,
     create_rgb_videos_step,
+    compute_projection_step,
     _summarize_timings_for_ui,
     extract_latents_step,
+    toggle_projection_controls,
 )
 
 
@@ -188,6 +190,46 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         self.assertIn("RGB videos created", status)
         self.assertEqual(video_path, str(dummy_artifacts.side_by_side_video_path))
         self.assertIn('"display_fps": 24.0', payload_json)
+
+    def test_toggle_projection_controls_shows_pca_and_umap_groups(self) -> None:
+        umap_update, pca_update = toggle_projection_controls("PCA")
+
+        self.assertFalse(umap_update["visible"])
+        self.assertTrue(pca_update["visible"])
+
+        umap_update, pca_update = toggle_projection_controls("UMAP")
+
+        self.assertTrue(umap_update["visible"])
+        self.assertFalse(pca_update["visible"])
+
+    def test_compute_projection_step_passes_selected_pca_mode(self) -> None:
+        latent_state = {
+            "output_prefix": "/tmp/latents",
+            "latent_grid": np.zeros((1, 2, 2, 2, 4), dtype=np.float32),
+        }
+        artifacts = SimpleNamespace(
+            projection_path=Path("/tmp/projection.projection.npz"),
+            metadata_path=Path("/tmp/projection.projection.metadata.json"),
+            projection_shape=(8, 2),
+            method="pca",
+            component_labels=("PC1", "PC2"),
+        )
+
+        with patch("vjepa2_latents.gradio_app.compute_projection_bundle") as bundle_mock:
+            bundle_mock.return_value = {
+                "projection": np.zeros((8, 2), dtype=np.float32),
+                "coordinates": np.zeros((8, 3), dtype=np.int32),
+                "method": "pca",
+                "method_label": "Spatial-only PCA",
+                "latent_grid_shape": [1, 2, 2, 2, 4],
+                "component_labels": ["PC1", "PC2"],
+                "explained_variance": [1.0, 0.0],
+                "settings": {"method": "pca", "method_label": "Spatial-only PCA", "pca_mode": "spatial", "n_components": 2, "umap_n_neighbors": 15, "umap_min_dist": 0.1, "umap_metric": "euclidean", "umap_random_state": 42, "projection_backend": "numpy-svd"},
+            }
+            with patch("vjepa2_latents.gradio_app.save_projection_artifacts", return_value=artifacts):
+                compute_projection_step(latent_state, "PCA", "spatial", 2, 15, 0.1, "euclidean", 42)
+
+        self.assertEqual(bundle_mock.call_args.kwargs["pca_mode"], "spatial")
 
 
 if __name__ == "__main__":

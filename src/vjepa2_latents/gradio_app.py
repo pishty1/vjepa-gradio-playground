@@ -58,6 +58,11 @@ PROJECTION_METHOD_CHOICES = [
 ]
 
 NEIGHBOR_TUNED_METHODS = {"umap", "umap_mlx", "pacmap_mlx", "localmap_mlx"}
+PCA_MODE_CHOICES = [
+    ("Global PCA", "global"),
+    ("Spatial-only PCA", "spatial"),
+    ("Temporal-only PCA", "temporal"),
+]
 
 
 def _resolve_video_path(video_file: str | None) -> Path:
@@ -284,23 +289,29 @@ def _format_projection_status(output_prefix: Path, metadata: dict[str, Any]) -> 
     )
 
 
-def _format_plot_status(method: str, component_indices: Sequence[int]) -> str:
+def _format_plot_status(method: str, component_indices: Sequence[int], method_label: str | None = None) -> str:
     selection = ", ".join(f"C{index + 1}" for index in component_indices)
     return "\n".join(
         [
             "## Plot updated",
-            f"- method: `{projection_method_display_name(method)}`",
+            f"- method: `{method_label or projection_method_display_name(method)}`",
             f"- plotted components: `{selection}`",
         ]
     )
 
 
-def _format_render_status(method: str, rgb_components: Sequence[int], latent_video_path: Path, side_by_side_video_path: Path) -> str:
+def _format_render_status(
+    method: str,
+    rgb_components: Sequence[int],
+    latent_video_path: Path,
+    side_by_side_video_path: Path,
+    method_label: str | None = None,
+) -> str:
     component_text = ", ".join(f"C{index + 1}" for index in rgb_components)
     return "\n".join(
         [
             "## RGB videos created",
-            f"- method: `{projection_method_display_name(method)}`",
+            f"- method: `{method_label or projection_method_display_name(method)}`",
             f"- RGB components: `{component_text}`",
             f"- latent video: `{latent_video_path}`",
             f"- side-by-side video: `{side_by_side_video_path}`",
@@ -314,14 +325,21 @@ def _format_hint_status(title: str, message: str) -> str:
 
 def _normalize_projection_settings(
     projection_method: str,
+    projection_pca_mode: str,
     projection_components: int | float,
     umap_n_neighbors: int | float,
     umap_min_dist: float,
     umap_metric: str,
     umap_random_state: float | None,
 ) -> dict[str, Any]:
+    pca_mode = (
+        projection_pca_mode.strip().lower().replace("-", "_").replace(" ", "_")
+        if projection_method.strip().lower() == "pca"
+        else "global"
+    )
     return {
         "method": projection_method.strip().lower(),
+        "pca_mode": pca_mode,
         "n_components": max(2, int(projection_components)),
         "umap_n_neighbors": max(2, int(umap_n_neighbors)),
         "umap_min_dist": float(umap_min_dist),
@@ -498,12 +516,13 @@ def load_latents_step(
 
 def toggle_projection_controls(projection_method: str):
     normalized = projection_method.strip().lower().replace("-", "_")
-    return gr.update(visible=normalized in NEIGHBOR_TUNED_METHODS)
+    return gr.update(visible=normalized in NEIGHBOR_TUNED_METHODS), gr.update(visible=normalized == "pca")
 
 
 def compute_projection_step(
     latent_state: dict[str, Any] | None,
     projection_method: str,
+    projection_pca_mode: str,
     projection_components: int,
     umap_n_neighbors: int,
     umap_min_dist: float,
@@ -530,6 +549,7 @@ def compute_projection_step(
         latent_grid, _ = load_saved_latents(latent_output_prefix)
     settings = _normalize_projection_settings(
         projection_method,
+        projection_pca_mode,
         projection_components,
         umap_n_neighbors,
         umap_min_dist,
@@ -540,7 +560,10 @@ def compute_projection_step(
         projection_bundle = compute_projection_bundle(latent_grid, **settings)
     except (RuntimeError, ValueError) as error:
         raise gr.Error(str(error)) from error
-    projection_output_prefix = latent_output_prefix.parent / f"projection_{settings['method']}_{projection_bundle['projection'].shape[1]}"
+    projection_name = settings["method"]
+    if projection_name == "pca" and settings.get("pca_mode") and settings["pca_mode"] != "global":
+        projection_name = f"{settings['pca_mode']}_pca"
+    projection_output_prefix = latent_output_prefix.parent / f"projection_{projection_name}_{projection_bundle['projection'].shape[1]}"
     artifacts = save_projection_artifacts(
         projection_output_prefix,
         projection_bundle,
@@ -653,7 +676,7 @@ def build_plot_step(
         component_labels=metadata.get("component_labels"),
         max_points=max(100, int(plot_max_points)),
     )
-    return figure, _format_plot_status(metadata["method"], component_indices)
+    return figure, _format_plot_status(metadata["method"], component_indices, metadata.get("method_label"))
 
 
 def create_rgb_videos_step(
@@ -729,6 +752,7 @@ def create_rgb_videos_step(
         rgb_components,
         artifacts.latent_video_path,
         artifacts.side_by_side_video_path,
+        projection_metadata.get("method_label"),
     )
     return status, str(artifacts.side_by_side_video_path), _serialize_json(payload)
 
@@ -793,6 +817,13 @@ def build_demo() -> gr.Blocks:
         with gr.Row():
             with gr.Column():
                 projection_method_input = gr.Dropdown(choices=PROJECTION_METHOD_CHOICES, value="PCA", label="Projection method")
+                with gr.Group(visible=True) as pca_controls:
+                    projection_pca_mode_input = gr.Radio(
+                        choices=PCA_MODE_CHOICES,
+                        value="global",
+                        label="PCA mode",
+                    )
+                    gr.Markdown("Use spatial-only PCA to average across time first, or temporal-only PCA to average across space first.")
                 projection_components_input = gr.Slider(minimum=2, maximum=5, step=1, value=5, label="Projected components")
                 with gr.Group(visible=False) as umap_controls:
                     umap_n_neighbors_input = gr.Slider(minimum=2, maximum=200, step=1, value=15, label="Neighbor count")
@@ -843,7 +874,7 @@ def build_demo() -> gr.Blocks:
         projection_method_input.change(
             fn=toggle_projection_controls,
             inputs=[projection_method_input],
-            outputs=[umap_controls],
+            outputs=[umap_controls, pca_controls],
         )
         plot_dimensions_input.change(
             fn=toggle_plot_dimensions,
@@ -900,6 +931,7 @@ def build_demo() -> gr.Blocks:
             inputs=[
                 latent_state,
                 projection_method_input,
+                projection_pca_mode_input,
                 projection_components_input,
                 umap_n_neighbors_input,
                 umap_min_dist_input,

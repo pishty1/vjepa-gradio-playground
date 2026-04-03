@@ -103,6 +103,61 @@ def projection_method_display_name(method: str) -> str:
     return method.strip() or "Projection"
 
 
+def _normalize_pca_mode(pca_mode: str | None) -> str:
+    if pca_mode is None:
+        return "global"
+    normalized = pca_mode.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "global": "global",
+        "global_only": "global",
+        "all": "global",
+        "spatial": "spatial",
+        "spatial_only": "spatial",
+        "time_averaged_spatial": "spatial",
+        "temporal": "temporal",
+        "temporal_only": "temporal",
+        "space_averaged_temporal": "temporal",
+    }
+    if normalized not in aliases:
+        raise ValueError(f"Unknown PCA mode: {pca_mode}")
+    return aliases[normalized]
+
+
+def projection_mode_display_name(method: str, pca_mode: str | None = None) -> str:
+    reducer_name = normalize_projection_method(method)
+    if reducer_name == "pca":
+        normalized_mode = _normalize_pca_mode(pca_mode)
+        if normalized_mode == "spatial":
+            return "Spatial-only PCA"
+        if normalized_mode == "temporal":
+            return "Temporal-only PCA"
+        return "PCA"
+    return projection_method_display_name(reducer_name)
+
+
+def _projection_inputs_for_mode(latent_grid: np.ndarray, pca_mode: str | None = None) -> tuple[np.ndarray, np.ndarray]:
+    if latent_grid.ndim != 5:
+        raise ValueError(f"Expected latent grid with 5 dims [b, t, h, w, d], got {latent_grid.shape}")
+    if latent_grid.shape[0] != 1:
+        raise ValueError(f"Expected batch size 1 for visualization, got {latent_grid.shape[0]}")
+
+    normalized_mode = _normalize_pca_mode(pca_mode)
+    if normalized_mode == "global":
+        return flatten_latent_grid(latent_grid)
+
+    _, time_steps, grid_h, grid_w, embed_dim = latent_grid.shape
+    if normalized_mode == "spatial":
+        reduced_grid = latent_grid.mean(axis=1, keepdims=True)
+        features = reduced_grid.reshape(grid_h * grid_w, embed_dim)
+        coordinates = np.stack(np.unravel_index(np.arange(features.shape[0]), (1, grid_h, grid_w)), axis=1)
+        return features.astype(np.float32, copy=False), coordinates.astype(np.int32, copy=False)
+
+    reduced_grid = latent_grid.mean(axis=(2, 3), keepdims=True)
+    features = reduced_grid.reshape(time_steps, embed_dim)
+    coordinates = np.stack(np.unravel_index(np.arange(features.shape[0]), (time_steps, 1, 1)), axis=1)
+    return features.astype(np.float32, copy=False), coordinates.astype(np.int32, copy=False)
+
+
 def _filtered_constructor_kwargs(constructor: Any, candidate_kwargs: dict[str, Any]) -> dict[str, Any]:
     signature = inspect.signature(constructor)
     accepts_var_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
@@ -271,14 +326,18 @@ def compute_projection_bundle(
     *,
     method: str = "pca",
     n_components: int = 3,
+    pca_mode: str | None = None,
     umap_n_neighbors: int = 15,
     umap_min_dist: float = 0.1,
     umap_metric: str = "euclidean",
     umap_random_state: int | None = 42,
 ) -> dict[str, Any]:
-    features, coordinates = flatten_latent_grid(latent_grid)
     reducer_name = normalize_projection_method(method)
     requested_components = max(2, int(n_components))
+    if reducer_name == "pca":
+        features, coordinates = _projection_inputs_for_mode(latent_grid, pca_mode)
+    else:
+        features, coordinates = flatten_latent_grid(latent_grid)
 
     if reducer_name == "pca":
         projection, explained = compute_pca_projection(features, n_components=requested_components)
@@ -312,19 +371,21 @@ def compute_projection_bundle(
     else:
         raise ValueError(f"Unknown projection method: {method}")
 
-    method_label = projection_method_display_name(reducer_name)
+    method_label = projection_mode_display_name(reducer_name, pca_mode)
     component_labels = projection_component_labels(reducer_name, projection.shape[1], explained)
     return {
         "projection": projection,
         "coordinates": coordinates,
         "method": reducer_name,
         "method_label": method_label,
+        "pca_mode": _normalize_pca_mode(pca_mode) if reducer_name == "pca" else None,
         "latent_grid_shape": list(latent_grid.shape),
         "component_labels": component_labels,
         "explained_variance": explained_list,
         "settings": {
             "method": reducer_name,
             "method_label": method_label,
+            "pca_mode": _normalize_pca_mode(pca_mode) if reducer_name == "pca" else None,
             "n_components": int(projection.shape[1]),
             "umap_n_neighbors": int(umap_n_neighbors),
             "umap_min_dist": float(umap_min_dist),

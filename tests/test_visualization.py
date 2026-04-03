@@ -36,6 +36,22 @@ class PcaProjectionTests(unittest.TestCase):
         self.assertEqual(explained.shape, (3,))
         self.assertTrue(np.all(explained >= 0))
 
+    def test_spatial_and_temporal_pca_modes_reduce_different_axes(self) -> None:
+        latent_grid = np.arange(1 * 3 * 2 * 4 * 6, dtype=np.float32).reshape(1, 3, 2, 4, 6)
+
+        spatial_bundle = compute_projection_bundle(latent_grid, method="pca", pca_mode="spatial", n_components=2)
+        temporal_bundle = compute_projection_bundle(latent_grid, method="pca", pca_mode="temporal", n_components=2)
+
+        self.assertEqual(spatial_bundle["projection"].shape, (8, 2))
+        self.assertEqual(spatial_bundle["coordinates"].shape, (8, 3))
+        self.assertTrue(np.all(spatial_bundle["coordinates"][:, 0] == 0))
+        self.assertEqual(spatial_bundle["method_label"], "Spatial-only PCA")
+
+        self.assertEqual(temporal_bundle["projection"].shape, (3, 2))
+        self.assertEqual(temporal_bundle["coordinates"].shape, (3, 3))
+        self.assertTrue(np.all(temporal_bundle["coordinates"][:, 1:] == 0))
+        self.assertEqual(temporal_bundle["method_label"], "Temporal-only PCA")
+
 
 class ProjectionFigureTests(unittest.TestCase):
     def test_builds_2d_pca_figure(self) -> None:
