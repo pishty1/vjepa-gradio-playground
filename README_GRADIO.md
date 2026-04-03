@@ -106,9 +106,49 @@ Current responsibilities:
 
 ### `src/vjepa2_latents/extractor.py`
 
-Existing extraction pipeline reused by the UI.
+Public extractor API and orchestration layer reused by the UI.
 
-It was also extended to support the Gradio workflow more cleanly:
+It now delegates to smaller helper modules so the pipeline is easier to maintain while keeping the existing import path stable.
+
+Current responsibilities:
+
+- expose the stable extractor API used by the Gradio app, tests, and CLI wrapper
+- keep patch-friendly wrappers for checkpoint download and extraction preflight helpers
+- orchestrate the full end-to-end extraction pipeline and CLI entrypoint
+
+Supporting extractor modules:
+
+### `src/vjepa2_latents/extractor_config.py`
+
+- define `ModelSpec`, `MODEL_SPECS`, image-normalization constants, crop parsing, and device selection
+- provide memory and token-estimation helpers used by preflight checks
+
+### `src/vjepa2_latents/extractor_checkpoint.py`
+
+- validate, download, and load checkpoints
+- expose vendored upstream `app/...` imports safely
+- construct the upstream encoder and load pretrained weights
+
+### `src/vjepa2_latents/extractor_video.py`
+
+- probe video metadata
+- select frame windows and decode source frames
+- apply resize, crop, and model-input preprocessing helpers
+- prepare display-aligned source frames for visualization
+
+### `src/vjepa2_latents/extractor_tensor.py`
+
+- run the encoder synchronously for accurate timing
+- reshape flat tokens back into the latent spatiotemporal grid
+- serialize `.npy`, optional `.pt`, and metadata outputs
+
+### `src/vjepa2_latents/extractor_logging.py`
+
+- keep shared extractor logging and timing helpers
+
+The logging helpers now focus on structured `[vjepa2]` console output and timing summaries.
+
+The extractor stack still supports the same workflow features:
 
 - rectangular crops via `normalize_crop_size()` and `parse_crop_size()`
 - preflight memory and token estimates via `estimate_extraction_requirements()`
@@ -134,7 +174,6 @@ Focused extractor and shape-utility coverage for:
 - extraction preflight estimation
 - reshape sub-step timing capture
 - cached checkpoint redownload behavior
-- synchronous encoder-run timing helper
 - optional `.pt` skipping during output serialization
 - output serialization timing metadata and logging
 
@@ -467,6 +506,12 @@ Recommended next improvements, in priority order:
 - app bootstrap: `app.py`
 - package exports: `src/vjepa2_latents/__init__.py`
 - UI construction: `src/vjepa2_latents/gradio_app.py::build_demo`
+- extractor orchestration: `src/vjepa2_latents/extractor.py::extract_latents`
+- extractor config helpers: `src/vjepa2_latents/extractor_config.py`
+- extractor checkpoint helpers: `src/vjepa2_latents/extractor_checkpoint.py`
+- extractor video helpers: `src/vjepa2_latents/extractor_video.py`
+- extractor tensor helpers: `src/vjepa2_latents/extractor_tensor.py`
+- extractor logging helpers: `src/vjepa2_latents/extractor_logging.py`
 - estimate step: `src/vjepa2_latents/gradio_app.py::estimate_limits_step`
 - extract step: `src/vjepa2_latents/gradio_app.py::extract_latents_step`
 - latent loading step: `src/vjepa2_latents/gradio_app.py::load_latents_step`
