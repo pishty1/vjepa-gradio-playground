@@ -170,6 +170,10 @@ class PatchSimilarityTests(unittest.TestCase):
         token_index = map_click_to_latent_token((95, 63), (64, 96, 3), (1, 2, 4, 6, 8))
         self.assertEqual(token_index, (0, 3, 5))
 
+    def test_maps_swapped_click_coordinates_to_the_visible_patch(self) -> None:
+        token_index = map_click_to_latent_token((20, 50), (64, 96, 3), (1, 2, 4, 6, 8))
+        self.assertEqual(token_index, (0, 3, 1))
+
     def test_computes_cosine_similarity_volume(self) -> None:
         latent_grid = np.array(
             [[[[[1.0, 0.0], [0.0, 1.0]]], [[[1.0, 0.0], [-1.0, 0.0]]]]],

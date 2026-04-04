@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import sys
 
-import torch
-
 
 def log_step(message: str) -> None:
     print(f"[vjepa2] {message}", file=sys.stderr, flush=True)
@@ -45,13 +43,3 @@ def log_timing_summary(
 
 def bytes_to_mib(num_bytes: int) -> float:
     return float(num_bytes) / (1024.0 * 1024.0)
-
-
-def device_executes_asynchronously(device: torch.device | None) -> bool:
-    if device is None:
-        return False
-    if device.type == "cuda":
-        return torch.cuda.is_available()
-    if device.type == "mps":
-        return hasattr(torch, "mps") and hasattr(torch.mps, "synchronize")
-    return False

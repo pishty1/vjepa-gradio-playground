@@ -29,7 +29,6 @@ from .extractor_config import (
 )
 from .extractor_logging import (
     bytes_to_mib,
-    device_executes_asynchronously,
     log_step,
     log_timing,
     log_timing_summary,
@@ -278,7 +277,6 @@ def extract_latents(
         "native_checkpoint_resolution": spec.native_resolution,
         "timings": {
             "encoder_forward_pass": {
-                "device_executes_asynchronously": device_executes_asynchronously(device),
                 "measured_synchronously": True,
                 "forward_run_seconds": encoder_forward_seconds,
                 "total_wall_seconds": encoder_forward_seconds,
@@ -289,15 +287,17 @@ def extract_latents(
             "V-JEPA 2.1 checkpoints are trained at 384 resolution.",
             "This extractor supports smaller inference crops such as 256 via RoPE-enabled variable-size inference.",
             "The PyTorch encoder in the official repo does not usually emit an extra modality token; stripping is automatic only if the token count is off by one.",
-            "On asynchronous devices such as Apple MPS, encoder enqueue time can be much smaller than the actual forward wall time because GPU work completes later at synchronization points.",
+            "The encoder call blocks until device work completes so timing reflects wall-clock execution.",
         ],
     }
+    cleanup_start = time.perf_counter()
     del encoder
     del video_tensor
     del frames
     del raw_tokens
     if device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
         torch.mps.empty_cache()
+    major_phase_timings["release tensors and clear device cache"] = time.perf_counter() - cleanup_start
 
     log_step(f"Starting output serialization with prefix {output_prefix}")
     output_serialization_timings: dict[str, float] = {}
@@ -457,7 +457,6 @@ __all__ = [
     "build_arg_parser",
     "center_crop",
     "clean_state_dict",
-    "device_executes_asynchronously",
     "download_checkpoint",
     "download_checkpoint_if_needed",
     "ensure_vendor_imports",

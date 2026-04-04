@@ -12,14 +12,24 @@ import torch
 from .extractor_logging import log_step, log_timing
 
 
+def _synchronize_device(device: torch.device) -> None:
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+    elif device.type == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        torch.mps.synchronize()
+
+
 def run_encoder_synchronously(
     encoder: torch.nn.Module,
     video_tensor: torch.Tensor,
     device: torch.device,
 ) -> tuple[torch.Tensor, float]:
+    input_tensor = video_tensor.to(device)
+    _synchronize_device(device)
     encoder_start = time.perf_counter()
     with torch.inference_mode():
-        raw_tokens = encoder(video_tensor.to(device))
+        raw_tokens = encoder(input_tensor)
+    _synchronize_device(device)
     encoder_seconds = time.perf_counter() - encoder_start
     return raw_tokens, encoder_seconds
 

@@ -775,8 +775,17 @@ def build_demo() -> gr.Blocks:
                         "Load latents first, then choose a frame for tracking.",
                     )
                 )
-                tracking_preview_output = gr.Image(label="First frame (click to choose a patch)", type="numpy")
-                tracking_video_output = gr.Video(label="Patch similarity heatmap video")
+                with gr.Row():
+                    with gr.Column(scale=1, min_width=0):
+                        tracking_preview_output = gr.Image(
+                            label="First frame (click to choose a patch)",
+                            type="numpy",
+                        )
+                    with gr.Column(scale=1, min_width=0):
+                        tracking_video_output = gr.Video(
+                            label="Patch similarity heatmap video",
+                            height=520,
+                        )
                 with gr.Accordion("Patch similarity metadata", open=False):
                     tracking_metadata_output = gr.Code(label="Patch similarity metadata", language="json", value="{}")
 

@@ -104,7 +104,6 @@ def _summarize_timings_for_ui(timings: dict[str, Any] | None) -> dict[str, Any]:
         summary["encoder_forward_pass"] = {
             key: _round_ui_number(encoder_forward[key])
             for key in (
-                "device_executes_asynchronously",
                 "measured_synchronously",
                 "forward_run_seconds",
                 "total_wall_seconds",

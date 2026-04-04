@@ -278,11 +278,29 @@ def map_click_to_latent_token(
 
     _, time_steps, grid_h, grid_w, _ = [int(value) for value in latent_grid_shape]
     clamped_time = min(max(int(time_index), 0), max(time_steps - 1, 0))
-    click_x = min(max(float(click_xy[0]), 0.0), image_width - 1)
-    click_y = min(max(float(click_xy[1]), 0.0), image_height - 1)
-    token_h = min(int((click_y / image_height) * grid_h), max(grid_h - 1, 0))
-    token_w = min(int((click_x / image_width) * grid_w), max(grid_w - 1, 0))
-    return clamped_time, token_h, token_w
+
+    def select_token(click_x: float, click_y: float) -> tuple[int, int, int]:
+        bounded_x = min(max(click_x, 0.0), image_width - 1)
+        bounded_y = min(max(click_y, 0.0), image_height - 1)
+        token_h = min(int((bounded_y / image_height) * grid_h), max(grid_h - 1, 0))
+        token_w = min(int((bounded_x / image_width) * grid_w), max(grid_w - 1, 0))
+        return clamped_time, token_h, token_w
+
+    def token_center_distance(token_index: tuple[int, int, int], click_x: float, click_y: float) -> float:
+        _, token_h, token_w = token_index
+        cell_width = image_width / max(grid_w, 1)
+        cell_height = image_height / max(grid_h, 1)
+        center_x = (token_w + 0.5) * cell_width
+        center_y = (token_h + 0.5) * cell_height
+        return float((center_x - click_x) ** 2 + (center_y - click_y) ** 2)
+
+    click_x = float(click_xy[0])
+    click_y = float(click_xy[1])
+    token_xy = select_token(click_x, click_y)
+    token_yx = select_token(click_y, click_x)
+    if token_center_distance(token_yx, click_x, click_y) < token_center_distance(token_xy, click_x, click_y):
+        return token_yx
+    return token_xy
 
 
 def cosine_similarity_volume(

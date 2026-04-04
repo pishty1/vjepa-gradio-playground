@@ -68,7 +68,6 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         self.assertEqual(
             summarized["encoder_forward_pass"],
             {
-                "device_executes_asynchronously": True,
                 "measured_synchronously": True,
                 "forward_run_seconds": 1.751,
                 "total_wall_seconds": 1.751,
