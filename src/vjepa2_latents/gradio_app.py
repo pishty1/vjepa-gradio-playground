@@ -147,8 +147,6 @@ def build_demo() -> gr.Blocks:
             fn=load_latents_step,
             inputs=[
                 latent_source["saved_latent_input"],
-                latent_source["latent_npy_input"],
-                latent_source["latent_metadata_input"],
                 latent_state,
             ],
             outputs=[

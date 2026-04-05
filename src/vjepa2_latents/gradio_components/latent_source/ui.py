@@ -56,10 +56,6 @@ def build_latent_source_section(*, model_choices: list[tuple[str, str]]) -> dict
                 info="Recent runs include timestamp, video, frame count, crop, and latent grid info.",
             )
             refresh_saved_latents_button = gr.Button("Refresh saved runs")
-        with gr.Accordion("Import latent files instead", open=False):
-            with gr.Row():
-                latent_npy_input = gr.File(label="Latent grid (.npy)", file_types=[".npy"], type="filepath")
-                latent_metadata_input = gr.File(label="Latent metadata (.json)", file_types=[".json"], type="filepath")
         load_latents_button = gr.Button("Load latents", variant="primary")
 
     latent_prefix_input = gr.Textbox(label="Active latent prefix", interactive=False)
@@ -87,8 +83,6 @@ def build_latent_source_section(*, model_choices: list[tuple[str, str]]) -> dict
         "extract_button": extract_button,
         "saved_latent_input": saved_latent_input,
         "refresh_saved_latents_button": refresh_saved_latents_button,
-        "latent_npy_input": latent_npy_input,
-        "latent_metadata_input": latent_metadata_input,
         "load_latents_button": load_latents_button,
         "latent_prefix_input": latent_prefix_input,
         "extraction_status_output": extraction_status_output,

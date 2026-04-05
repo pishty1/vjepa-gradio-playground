@@ -209,8 +209,6 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             status, latent_prefix, payload_json, next_state, *_ = load_latents_step(
                 "/tmp/example_latents",
                 None,
-                None,
-                None,
             )
 
         expected_prefix = str(Path("/tmp/example_latents").resolve())

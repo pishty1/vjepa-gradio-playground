@@ -158,42 +158,34 @@ def extract_latents_step(
 
 def load_latents_step(
     saved_latent_prefix: str | None,
-    latent_npy_file: str | None,
-    latent_metadata_file: str | None,
     latent_state: dict[str, Any] | None,
 ):
     active_prefix = saved_latent_prefix or (latent_state.get("output_prefix") if latent_state else None)
     _log_gradio_step("load_latents", f"prefix={active_prefix or 'none'}")
-    if latent_npy_file and latent_metadata_file:
-        session_dir = _create_session_dir("vjepa2-latents-")
-        output_prefix = session_dir / "latents"
-        shutil.copy2(latent_npy_file, output_prefix.with_suffix(".npy"))
-        shutil.copy2(latent_metadata_file, output_prefix.with_suffix(".metadata.json"))
-    else:
-        output_prefix = _normalize_prefix(saved_latent_prefix, (".npy", ".metadata.json"))
-        if output_prefix is None and latent_state and latent_state.get("output_prefix"):
-            output_prefix = Path(latent_state["output_prefix"])
-        if output_prefix is None:
-            return (
-                _format_hint_status(
-                    "Latents not loaded",
-                    "Choose a saved latent run from the list or upload both latent files before loading latents.",
-                ),
-                "",
-                "{}",
-                latent_state,
-                None,
-                "",
-                "{}",
-                None,
-                None,
-                _format_hint_status(
-                    "RGB videos not ready",
-                    "Load latents first, then compute or load a projection before rendering videos.",
-                ),
-                "{}",
-                refresh_saved_latent_choices(),
-            )
+    output_prefix = _normalize_prefix(saved_latent_prefix, (".npy", ".metadata.json"))
+    if output_prefix is None and latent_state and latent_state.get("output_prefix"):
+        output_prefix = Path(latent_state["output_prefix"])
+    if output_prefix is None:
+        return (
+            _format_hint_status(
+                "Latents not loaded",
+                "Choose a saved latent run from the list before loading latents.",
+            ),
+            "",
+            "{}",
+            latent_state,
+            None,
+            "",
+            "{}",
+            None,
+            None,
+            _format_hint_status(
+                "RGB videos not ready",
+                "Load latents first, then compute or load a projection before rendering videos.",
+            ),
+            "{}",
+            refresh_saved_latent_choices(),
+        )
 
     latent_grid, metadata = load_saved_latents(output_prefix)
     summary = summarize_latents(latent_grid)
