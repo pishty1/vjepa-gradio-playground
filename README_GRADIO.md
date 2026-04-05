@@ -2,6 +2,8 @@
 
 This document describes the current Gradio app in this workspace, the staged latent-space workflow it exposes, and the related extractor and visualization changes that support it.
 
+For a VOS-only explanation grounded in both the current code and the V-JEPA 2.1 paper, see `src/vjepa2_latents/vos/README.md`.
+
 ## Purpose
 
 The app provides a browser UI for exploring V-JEPA 2.1 latents without opening the notebook.
@@ -18,6 +20,7 @@ It supports a staged workflow where each step can run independently:
 7. generate RGB latent videos from any selected 3 projection components
 8. generate a side-by-side source/latent comparison video
 9. click a patch in the first frame and render a cosine-similarity tracking heatmap over time
+10. click one foreground point and one background point, then render a KNN-based binary segmentation mask video
 
 ## Files
 
@@ -50,6 +53,9 @@ Current responsibilities:
 - show a click-to-track first-frame preview for dense patch similarity
 - map first-frame click coordinates onto latent tokens at `t=0`
 - render cosine-similarity heatmaps over time as MP4 videos
+- show a promptable VOS preview for one green foreground click and one red background click
+- classify all latent tokens with a tiny foreground/background KNN in latent space
+- render binary segmentation-mask overlays over time as MP4 videos
 - keep the metadata-heavy outputs collapsed by default so the main controls stay uncluttered
 - return status and JSON metadata for each stage separately
 - emit concise `[vjepa2]` console progress logs for the main Gradio stages
@@ -91,7 +97,9 @@ Current responsibilities:
 - compose side-by-side videos with aspect-ratio-aware padding
 - map clicked image coordinates to latent token indices
 - compute token-to-token cosine similarity volumes
+- classify latent tokens with a small foreground/background KNN
 - blend hotspot-focused similarity heatmaps over source frames
+- blend binary segmentation masks over source frames and annotate prompt points
 - export browser-friendly `.mp4` outputs with `ffmpeg`
 
 ### `src/vjepa2_latents/visualization.py`
@@ -214,12 +222,15 @@ browser UI
   -> create_rgb_videos_step(...)
   -> prepare_tracking_step(...)
   -> select_patch_similarity_step(...)
+  -> prepare_segmentation_step(...)
+  -> select_segmentation_prompt_step(...)
+  -> run_segmentation_step(...)
   -> return stage-specific status + artifacts + metadata
 ```
 
 ## Current UI layout
 
-The app is built in `build_demo()` and split into 6 main sections, with a preflight estimate action inside the extraction section.
+The app is built in `build_demo()` and split into 6 main sections plus a second analysis tab for VOS-style segmentation, with a preflight estimate action inside the extraction section.
 
 ### 1. Extract latents from video
 
@@ -370,6 +381,41 @@ Behavior:
 - each frame also marks the best-matching patch location, while the first frame keeps the originally selected patch outlined in a brighter accent color
 - Gradio extraction calls `extract_latents(..., save_pt=False)`, so the UI path persists `.npy` and `.metadata.json` but skips `.pt`
 
+### 7. Foreground / Background VOS
+
+For the dedicated VOS walkthrough, paper comparison, and code map, see `src/vjepa2_latents/vos/README.md`.
+
+Inputs:
+
+- loaded latent state from the earlier extract/load stages
+- a frame selector for choosing one of the available source frames
+- a radio that decides whether the next click sets the foreground or background prompt
+- one green foreground click and one red background click on the selected frame
+- top-`k` neighbor count, defaulting to the paper-style `5`
+
+Buttons / interactions:
+
+- `Show frame for VOS prompts`
+- click the frame once for foreground and once for background
+- `Run VOS segmentation`
+
+Outputs:
+
+- prompt-frame preview with green/red prompt markers
+- VOS segmentation status
+- binary segmentation-mask overlay `.mp4`
+- segmentation metadata JSON, collapsed by default
+
+Behavior:
+
+- prompts are constrained to the first frame to match the paper's supervision setup
+- clicked foreground/background latent tokens seed the initial label set
+- weighted top-`k` cosine propagation uses paper-style defaults: `temperature=0.2`, `context_frames=15`, `spatial_radius=12`
+- later frames propagate labels using the first frame plus a rolling bank of past-frame predictions
+- the resulting binary mask is resized back onto the display frames and blended as a green segmentation overlay
+- the first frame keeps the original foreground/background prompt markers so the segmentation source is obvious
+- this remains a sparse-prompt demo, so it is closer to the paper's propagation mechanics than to its exact dense-mask benchmark protocol
+
 ### 2. Load latent space
 
 Inputs:
@@ -400,6 +446,7 @@ These videos are encoded for direct browser playback with H.264 (`libx264`) and 
 Saved by the tracking step under a `tracking/` directory beside the latent files:
 
 - `patch_similarity_t<t>-h<h>-w<w>.mp4`
+- `vos_segmentation_fg_t<t>-h<h>-w<w>_bg_t<t>-h<h>-w<w>.mp4`
 
 Tracking metadata includes:
 
@@ -407,6 +454,15 @@ Tracking metadata includes:
 - selected latent token indices
 - similarity value range
 - peak patch location per frame when rendered
+- rendered video path, shape, and playback FPS
+
+Segmentation metadata includes:
+
+- foreground/background click coordinates
+- foreground/background latent token indices
+- KNN neighbor count
+- propagation temperature, context-frame count, and spatial radius
+- per-frame foreground coverage ratio
 - rendered video path, shape, and playback FPS
 
 ## Visualization details
@@ -449,6 +505,18 @@ That means the app can:
 - visualize token affinity over time as a clearer hotspot-focused heatmap overlay
 - show the best-matching patch at each frame and the original selection on the first frame
 - approximate the paper-style non-parametric label-propagation intuition without fine-tuning
+
+### Foreground / background VOS
+
+The new VOS component uses the same latent grid but switches from single-token cosine scoring to a paper-aligned weighted top-`k` label-propagation scheme seeded by two clicks.
+
+That means the app can:
+
+- let the user provide one positive prompt and one negative prompt directly on the source frame
+- map both prompts into first-frame latent tokens
+- propagate binary labels with weighted cosine top-`k` matching, temperature scaling, temporal context, and a local spatial neighborhood
+- render a binary object mask overlay that matches the paper's propagation mechanics more closely
+- save the segmentation overlay video beside the other tracking artifacts
 
 ## `mlx-vis` integration notes
 
@@ -521,6 +589,9 @@ Recommended next improvements, in priority order:
 - render step: `src/vjepa2_latents/gradio_app.py::create_rgb_videos_step`
 - tracking preview step: `src/vjepa2_latents/gradio_app.py::prepare_tracking_step`
 - tracking click handler: `src/vjepa2_latents/gradio_app.py::select_patch_similarity_step`
+- segmentation preview step: `src/vjepa2_latents/gradio_app.py::prepare_segmentation_step`
+- segmentation click handler: `src/vjepa2_latents/gradio_app.py::select_segmentation_prompt_step`
+- segmentation runner: `src/vjepa2_latents/gradio_app.py::run_segmentation_step`
 - shared Gradio helpers: `src/vjepa2_latents/gradio_utils.py`
 - projection helpers: `src/vjepa2_latents/projection.py::compute_projection_bundle`
 - optional MLX reducer helper: `src/vjepa2_latents/projection.py::compute_mlx_projection`
@@ -532,6 +603,8 @@ Recommended next improvements, in priority order:
 - click-to-token mapping: `src/vjepa2_latents/video.py::map_click_to_latent_token`
 - dense similarity computation: `src/vjepa2_latents/video.py::cosine_similarity_volume`
 - tracking video export: `src/vjepa2_latents/video.py::create_patch_similarity_video`
+- VOS token classification: `src/vjepa2_latents/video.py::knn_binary_segmentation_volume`
+- segmentation video export: `src/vjepa2_latents/video.py::create_segmentation_video`
 - extractor preflight and crop helpers: `src/vjepa2_latents/extractor.py::estimate_extraction_requirements`, `normalize_crop_size`, `parse_crop_size`, `prepare_display_frames`
 
 ## Local usage
@@ -571,5 +644,6 @@ It currently lets you:
 - choose arbitrary projection components for RGB rendering
 - create non-squashed side-by-side videos for source vs latent comparison
 - click a first-frame patch and inspect dense cosine-similarity tracking over time
+- click foreground/background prompts and inspect a binary KNN segmentation mask over time
 
 That makes it much easier to iterate on latent analysis without rerunning the whole pipeline each time.

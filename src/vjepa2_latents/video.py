@@ -11,6 +11,13 @@ import cv2
 import numpy as np
 
 from .extractor import normalize_crop_size, prepare_display_frames, read_video_frames
+from .vos.core import (
+    SegmentationArtifacts,
+    annotate_prompt_points,
+    create_segmentation_video,
+    knn_binary_segmentation_volume,
+    segmentation_mask_frames,
+)
 from .projection import (
     compute_projection_bundle,
     flatten_latent_grid,
@@ -669,3 +676,5 @@ def create_patch_similarity_video(
         similarity_min=float(similarity_volume.min()),
         similarity_max=float(similarity_volume.max()),
     )
+
+

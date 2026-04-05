@@ -20,6 +20,9 @@ from vjepa2_latents.gradio_app import (
     create_rgb_videos_step,
     compute_projection_step,
     prepare_tracking_step,
+    prepare_segmentation_step,
+    run_segmentation_step,
+    select_segmentation_prompt_step,
     select_patch_similarity_step,
     _summarize_timings_for_ui,
     extract_latents_step,
@@ -306,6 +309,106 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         self.assertEqual(video_path, "/tmp/patch_similarity.mp4")
         self.assertIn('"w": 2', metadata_json)
         self.assertEqual(next_state["selected_token"], [1, 1, 2])
+
+    def test_prepare_segmentation_step_returns_frame_and_state(self) -> None:
+        latent_state = {
+            "output_prefix": "/tmp/latents",
+            "latent_grid": np.zeros((1, 2, 4, 4, 3), dtype=np.float32),
+            "metadata": {
+                "video_path": "/tmp/example.mp4",
+                "frame_indices": [0, 2, 4, 6],
+                "video_metadata": {"fps": 24.0},
+                "tubelet_size": 2,
+                "crop_size": [384, 384],
+            },
+        }
+        source_frames = np.zeros((2, 48, 48, 3), dtype=np.uint8)
+        source_frames[1, :, :, :] = 77
+
+        with patch("vjepa2_latents.gradio_app.load_aligned_source_frames", return_value=(source_frames, 6.0, [12, 14])):
+            frame_update, preview, status, metadata_json, segmentation_state, video_path = prepare_segmentation_step(latent_state, 1)
+
+        self.assertEqual(frame_update["choices"], [("Frame 1 (video frame 12)", 0)])
+        self.assertFalse(frame_update["interactive"])
+        self.assertTrue(np.all(preview == 0))
+        self.assertIn("VOS segmentation ready", status)
+        self.assertIn('"selected_frame_index": 0', metadata_json)
+        self.assertIn('"top_k": 5', metadata_json)
+        self.assertEqual(segmentation_state["selected_frame_index"], 0)
+        self.assertEqual(segmentation_state["prompt_points"], {})
+        self.assertIsNone(video_path)
+
+    def test_select_segmentation_prompt_and_run_use_cached_frames(self) -> None:
+        latent_state = {
+            "output_prefix": "/tmp/latents",
+            "latent_grid": np.zeros((1, 2, 4, 4, 3), dtype=np.float32),
+            "metadata": {
+                "video_path": "/tmp/example.mp4",
+                "frame_indices": [0, 2, 4, 6],
+                "video_metadata": {"fps": 24.0},
+                "tubelet_size": 2,
+                "crop_size": [384, 384],
+            },
+        }
+        segmentation_state = {
+            "latent_output_prefix": "/tmp/latents",
+            "source_frames": np.zeros((2, 64, 64, 3), dtype=np.uint8),
+            "display_fps": 6.0,
+            "latent_grid_shape": [1, 2, 4, 4, 3],
+            "source_frame_indices": [12, 14],
+            "selected_frame_index": 0,
+            "prompt_points": {},
+            "prompt_tokens": {},
+        }
+        segmentation_artifacts = SimpleNamespace(
+            segmentation_video_path=Path("/tmp/vos_segmentation.mp4"),
+            segmentation_video_shape=(2, 64, 64, 3),
+            display_fps=6.0,
+            foreground_token=(0, 1, 2),
+            background_token=(0, 3, 0),
+            knn_neighbors=1,
+            temperature=0.2,
+            context_frames=15,
+            spatial_radius=12,
+            foreground_ratio_per_frame=(0.25, 0.5),
+        )
+
+        preview, _status, metadata_json, next_state = select_segmentation_prompt_step(
+            latent_state,
+            segmentation_state,
+            "foreground",
+            SimpleNamespace(index=(33, 17)),
+        )
+        self.assertEqual(preview.shape, (64, 64, 3))
+        self.assertIn("foreground", metadata_json)
+        self.assertEqual(next_state["prompt_tokens"]["foreground"], [0, 1, 2])
+
+        preview2, _status2, metadata_json2, next_state2 = select_segmentation_prompt_step(
+            latent_state,
+            next_state,
+            "background",
+            SimpleNamespace(index=(2, 60)),
+        )
+        self.assertEqual(preview2.shape, (64, 64, 3))
+        self.assertIn("background", metadata_json2)
+        self.assertEqual(next_state2["prompt_tokens"]["background"], [0, 3, 0])
+
+        with (
+            patch("vjepa2_latents.gradio_app.load_aligned_source_frames", side_effect=AssertionError("cached frames should be reused")),
+            patch("vjepa2_latents.gradio_app.create_segmentation_video", return_value=segmentation_artifacts) as create_mock,
+        ):
+            status3, video_path, metadata_json3, next_state3 = run_segmentation_step(latent_state, next_state2, 1)
+
+        self.assertEqual(create_mock.call_args.kwargs["foreground_token"], [0, 1, 2])
+        self.assertEqual(create_mock.call_args.kwargs["background_token"], [0, 3, 0])
+        self.assertEqual(create_mock.call_args.kwargs["temperature"], 0.2)
+        self.assertEqual(create_mock.call_args.kwargs["context_frames"], 15)
+        self.assertEqual(create_mock.call_args.kwargs["spatial_radius"], 12)
+        self.assertIn("VOS segmentation video ready", status3)
+        self.assertEqual(video_path, "/tmp/vos_segmentation.mp4")
+        self.assertIn('"temperature": 0.2', metadata_json3)
+        self.assertIn('"knn_neighbors": 1', metadata_json3)
+        self.assertEqual(next_state3["segmentation_video_path"], "/tmp/vos_segmentation.mp4")
 
 
 if __name__ == "__main__":

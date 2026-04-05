@@ -29,6 +29,9 @@ from .gradio_utils import (
     _format_preflight_status,
     _format_projection_status,
     _format_render_status,
+    # _format_segmentation_prompt_status,
+    # _format_segmentation_ready_status,
+    # _format_segmentation_result_status,
     _format_tracking_ready_status,
     _format_tracking_result_status,
     _latent_state,
@@ -43,11 +46,14 @@ from .gradio_utils import (
     _tracking_frame_choices,
     summarize_latents,
 )
+from .vos import gradio as _vos_gradio
 from .visualization import (
+    annotate_prompt_points,
     annotate_selected_patch,
     build_projection_figure_from_data,
     compute_projection_bundle,
     create_patch_similarity_video,
+    create_segmentation_video,
     create_visualizations_from_projection,
     has_mlx_vis_support,
     load_aligned_source_frames,
@@ -56,6 +62,41 @@ from .visualization import (
     map_click_to_latent_token,
     save_projection_artifacts,
 )
+
+
+def prepare_segmentation_step(latent_state: dict[str, Any] | None, segmentation_frame_index: int | str | None = 0):
+    _vos_gradio.load_aligned_source_frames = load_aligned_source_frames
+    _vos_gradio.load_saved_latents = load_saved_latents
+    _vos_gradio._load_latent_metadata = _load_latent_metadata
+    return _vos_gradio.prepare_segmentation_step(latent_state, segmentation_frame_index)
+
+
+def select_segmentation_prompt_step(
+    latent_state: dict[str, Any] | None,
+    segmentation_state: dict[str, Any] | None,
+    prompt_label: str,
+    evt: gr.SelectData,
+):
+    _vos_gradio.annotate_prompt_points = annotate_prompt_points
+    _vos_gradio.load_aligned_source_frames = load_aligned_source_frames
+    _vos_gradio.load_saved_latents = load_saved_latents
+    _vos_gradio.map_click_to_latent_token = map_click_to_latent_token
+    _vos_gradio._load_latent_metadata = _load_latent_metadata
+    return _vos_gradio.select_segmentation_prompt_step(latent_state, segmentation_state, prompt_label, evt)
+
+
+def run_segmentation_step(
+    latent_state: dict[str, Any] | None,
+    segmentation_state: dict[str, Any] | None,
+    vos_knn_neighbors: int | float,
+):
+    _vos_gradio.create_segmentation_video = create_segmentation_video
+    _vos_gradio.load_aligned_source_frames = load_aligned_source_frames
+    _vos_gradio.load_saved_latents = load_saved_latents
+    _vos_gradio._load_latent_metadata = _load_latent_metadata
+    return _vos_gradio.run_segmentation_step(latent_state, segmentation_state, vos_knn_neighbors)
+
+
 def estimate_limits_step(
     video_file: str | None,
     model_name: str,
@@ -665,6 +706,7 @@ def build_demo() -> gr.Blocks:
         latent_state = gr.State(value=None)
         projection_state = gr.State(value=None)
         tracking_state = gr.State(value=None)
+        segmentation_state = gr.State(value=None)
 
         gr.Markdown("## 1. Extract latents from video")
         with gr.Row():
@@ -788,6 +830,44 @@ def build_demo() -> gr.Blocks:
                         )
                 with gr.Accordion("Patch similarity metadata", open=False):
                     tracking_metadata_output = gr.Code(label="Patch similarity metadata", language="json", value="{}")
+
+            with gr.Tab("Foreground / Background VOS"):
+                gr.Markdown(
+                    "Click one foreground point and one background point on the selected frame, then classify every latent token with a tiny KNN in latent space to render a binary segmentation mask video."
+                )
+                with gr.Row():
+                    segmentation_frame_input = gr.Dropdown(choices=[], value=None, label="Prompt frame (paper uses the first frame)")
+                    segmentation_prompt_label_input = gr.Radio(
+                        choices=[("Foreground (green)", "foreground"), ("Background (red)", "background")],
+                        value="foreground",
+                        label="Next click assigns",
+                    )
+                    vos_knn_neighbors_input = gr.Slider(minimum=1, maximum=15, step=1, value=5, label="Top-k neighbors")
+                gr.Markdown(
+                    "Paper-aligned defaults are used for propagation: cosine similarity, temperature `0.2`, up to `15` context frames, local radius `12`, and first-frame-only prompts. "
+                    "This UI still uses sparse foreground/background clicks instead of the paper's dense first-frame object masks."
+                )
+                prepare_segmentation_button = gr.Button("Show frame for VOS prompts")
+                run_segmentation_button = gr.Button("Run VOS segmentation", variant="primary")
+                segmentation_status_output = gr.Markdown(
+                    value=_format_hint_status(
+                        "VOS segmentation not ready",
+                        "Load latents first, then choose a frame and add foreground/background prompts.",
+                    )
+                )
+                with gr.Row():
+                    with gr.Column(scale=1, min_width=0):
+                        segmentation_preview_output = gr.Image(
+                            label="Prompt frame (click to place foreground/background points)",
+                            type="numpy",
+                        )
+                    with gr.Column(scale=1, min_width=0):
+                        segmentation_video_output = gr.Video(
+                            label="Binary segmentation mask video",
+                            height=520,
+                        )
+                with gr.Accordion("VOS segmentation metadata", open=False):
+                    segmentation_metadata_output = gr.Code(label="VOS segmentation metadata", language="json", value="{}")
 
         projection_method_input.change(
             fn=toggle_projection_controls,
@@ -954,6 +1034,54 @@ def build_demo() -> gr.Blocks:
                 tracking_video_output,
                 tracking_metadata_output,
                 tracking_state,
+            ],
+        )
+
+        prepare_segmentation_button.click(
+            fn=prepare_segmentation_step,
+            inputs=[latent_state, segmentation_frame_input],
+            outputs=[
+                segmentation_frame_input,
+                segmentation_preview_output,
+                segmentation_status_output,
+                segmentation_metadata_output,
+                segmentation_state,
+                segmentation_video_output,
+            ],
+        )
+
+        segmentation_frame_input.change(
+            fn=prepare_segmentation_step,
+            inputs=[latent_state, segmentation_frame_input],
+            outputs=[
+                segmentation_frame_input,
+                segmentation_preview_output,
+                segmentation_status_output,
+                segmentation_metadata_output,
+                segmentation_state,
+                segmentation_video_output,
+            ],
+        )
+
+        segmentation_preview_output.select(
+            fn=select_segmentation_prompt_step,
+            inputs=[latent_state, segmentation_state, segmentation_prompt_label_input],
+            outputs=[
+                segmentation_preview_output,
+                segmentation_status_output,
+                segmentation_metadata_output,
+                segmentation_state,
+            ],
+        )
+
+        run_segmentation_button.click(
+            fn=run_segmentation_step,
+            inputs=[latent_state, segmentation_state, vos_knn_neighbors_input],
+            outputs=[
+                segmentation_status_output,
+                segmentation_video_output,
+                segmentation_metadata_output,
+                segmentation_state,
             ],
         )
 

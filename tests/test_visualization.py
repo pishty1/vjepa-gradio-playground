@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from vjepa2_latents.visualization import (
     _ensure_even_frame_size,
+    annotate_prompt_points,
     annotate_selected_patch,
     build_projection_figure,
     build_projection_figure_from_data,
@@ -21,12 +22,14 @@ from vjepa2_latents.visualization import (
     compute_mlx_projection,
     has_umap_support,
     infer_latent_fps,
+    knn_binary_segmentation_volume,
     latent_rgb_frames,
     load_saved_projection,
     map_click_to_latent_token,
     projection_method_display_name,
     projection_rgb_frames,
     save_projection_artifacts,
+    segmentation_mask_frames,
     similarity_heatmap_frames,
     side_by_side_frames,
 )
@@ -207,6 +210,49 @@ class PatchSimilarityTests(unittest.TestCase):
         self.assertEqual(overlay.dtype, np.uint8)
         self.assertGreater(hotspot_delta, background_delta)
         self.assertEqual(annotated.shape, overlay[0].shape)
+        self.assertFalse(np.array_equal(annotated, overlay[0]))
+
+    def test_knn_binary_segmentation_volume_separates_foreground_and_background(self) -> None:
+        latent_grid = np.array(
+            [
+                [
+                    [
+                        [[1.0, 0.0], [0.9, 0.1]],
+                        [[0.0, 1.0], [0.1, 0.9]],
+                    ],
+                    [
+                        [[0.95, 0.05], [0.85, 0.15]],
+                        [[0.05, 0.95], [0.15, 0.85]],
+                    ],
+                ]
+            ],
+            dtype=np.float32,
+        )
+
+        segmentation = knn_binary_segmentation_volume(latent_grid, (0, 0, 0), (0, 1, 0), k_neighbors=1)
+
+        self.assertEqual(segmentation.shape, (2, 2, 2))
+        self.assertTrue(bool(segmentation[0, 0, 0]))
+        self.assertTrue(bool(segmentation[1, 0, 1]))
+        self.assertFalse(bool(segmentation[0, 1, 0]))
+        self.assertFalse(bool(segmentation[1, 1, 1]))
+
+    def test_segmentation_mask_frames_and_prompt_annotation(self) -> None:
+        source_frames = np.full((2, 32, 48, 3), 120, dtype=np.uint8)
+        segmentation = np.array(
+            [
+                [[1, 1], [0, 0]],
+                [[0, 1], [0, 1]],
+            ],
+            dtype=bool,
+        )
+
+        overlay = segmentation_mask_frames(source_frames, segmentation, alpha=0.5)
+        annotated = annotate_prompt_points(overlay[0], {"foreground": (8, 8), "background": (36, 24)})
+
+        self.assertEqual(overlay.shape, source_frames.shape)
+        self.assertEqual(overlay.dtype, np.uint8)
+        self.assertFalse(np.array_equal(overlay[0, 4, 4], source_frames[0, 4, 4]))
         self.assertFalse(np.array_equal(annotated, overlay[0]))
 
 

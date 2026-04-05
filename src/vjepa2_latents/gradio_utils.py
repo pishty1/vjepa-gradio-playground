@@ -9,6 +9,11 @@ from typing import Any, Sequence
 import gradio as gr
 
 from .extractor import MODEL_SPECS, log_step
+from .vos.status import (
+    _format_segmentation_prompt_status,
+    _format_segmentation_ready_status,
+    _format_segmentation_result_status,
+)
 from .visualization import projection_method_display_name
 from .visualization import summarize_latents
 
