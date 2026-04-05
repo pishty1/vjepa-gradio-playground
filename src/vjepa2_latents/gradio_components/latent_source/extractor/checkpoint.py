@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import importlib.machinery
 import importlib
+import importlib.machinery
 import os
 import sys
 import time
@@ -12,8 +12,8 @@ from typing import Any, Sequence
 
 import torch
 
-from .extractor_config import MODEL_SPECS
-from .extractor_logging import log_step
+from .config import MODEL_SPECS
+from .utils.logging import log_step
 
 
 def clean_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

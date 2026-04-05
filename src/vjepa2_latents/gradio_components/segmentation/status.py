@@ -17,7 +17,6 @@ def _format_segmentation_ready_status(latent_grid_shape: Sequence[int], display_
     )
 
 
-
 def _format_segmentation_prompt_status(
     prompt_points: dict[str, Sequence[int]] | None,
     *,
@@ -42,7 +41,6 @@ def _format_segmentation_prompt_status(
     else:
         lines.append("- next: click **Run VOS segmentation** to classify all latent tokens as foreground/background.")
     return "\n".join(lines)
-
 
 
 def _format_segmentation_result_status(

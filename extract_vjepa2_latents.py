@@ -5,7 +5,7 @@ import sys
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from vjepa2_latents.extractor import main
+from vjepa2_latents.gradio_components.latent_source.extractor import main
 
 
 if __name__ == "__main__":

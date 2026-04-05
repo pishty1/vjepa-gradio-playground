@@ -7,7 +7,8 @@ from typing import Any, Sequence
 import cv2
 import numpy as np
 
-from ..projection import flatten_latent_grid
+from ..projection.core import flatten_latent_grid
+from ..render.video import infer_latent_fps, write_video
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,6 @@ class SegmentationArtifacts:
     context_frames: int
     spatial_radius: int
     foreground_ratio_per_frame: tuple[float, ...]
-
 
 
 def annotate_prompt_points(
@@ -60,7 +60,6 @@ def annotate_prompt_points(
             cv2.LINE_AA,
         )
     return annotated
-
 
 
 def knn_binary_segmentation_volume(
@@ -218,7 +217,6 @@ def knn_binary_segmentation_volume(
     return hard_label_volume == 0
 
 
-
 def segmentation_mask_frames(
     source_frames: np.ndarray,
     segmentation_volume: np.ndarray,
@@ -256,76 +254,59 @@ def segmentation_mask_frames(
     return np.stack(blended_frames, axis=0)
 
 
-
 def create_segmentation_video(
-    *,
     latent_grid: np.ndarray,
     metadata: dict[str, Any],
     output_dir: Path,
+    *,
     foreground_token: Sequence[int],
     background_token: Sequence[int],
-    source_frames: np.ndarray | None = None,
-    foreground_click_xy: Sequence[int | float] | None = None,
-    background_click_xy: Sequence[int | float] | None = None,
+    source_frames: np.ndarray,
+    foreground_click_xy: Sequence[int] | None = None,
+    background_click_xy: Sequence[int] | None = None,
     k_neighbors: int = 5,
     temperature: float = 0.2,
     context_frames: int = 15,
     spatial_radius: int = 12,
-    alpha: float = 0.45,
 ) -> SegmentationArtifacts:
-    from ..video import infer_latent_fps, load_aligned_source_frames, write_video
-
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if source_frames is None:
-        source_frames, latent_fps, _ = load_aligned_source_frames(metadata, latent_grid.shape)
-    else:
-        latent_fps = infer_latent_fps(
-            [int(index) for index in metadata["frame_indices"]],
-            float(metadata.get("video_metadata", {}).get("fps", 0.0) or 0.0),
-            tubelet_size=int(metadata.get("tubelet_size", 2) or 2),
-        )
-
-    normalized_foreground = tuple(int(value) for value in foreground_token)
-    normalized_background = tuple(int(value) for value in background_token)
     segmentation_volume = knn_binary_segmentation_volume(
         latent_grid,
-        normalized_foreground,
-        normalized_background,
+        foreground_token,
+        background_token,
         k_neighbors=k_neighbors,
         temperature=temperature,
         context_frames=context_frames,
         spatial_radius=spatial_radius,
     )
-    overlay_frames = segmentation_mask_frames(source_frames, segmentation_volume, alpha=alpha)
-    overlay_frames[0] = annotate_prompt_points(
-        overlay_frames[0],
-        {
-            "foreground": foreground_click_xy,
-            "background": background_click_xy,
-        },
-    )
+    overlay_frames = segmentation_mask_frames(source_frames, segmentation_volume)
+    prompt_points = {
+        "foreground": None if foreground_click_xy is None else [int(foreground_click_xy[0]), int(foreground_click_xy[1])],
+        "background": None if background_click_xy is None else [int(background_click_xy[0]), int(background_click_xy[1])],
+    }
+    overlay_frames[0] = annotate_prompt_points(overlay_frames[0], prompt_points)
 
-    output_path = write_video(
-        output_dir
-        / (
-            f"vos_segmentation_fg_t{normalized_foreground[0] + 1}_h{normalized_foreground[1] + 1}_w{normalized_foreground[2] + 1}"
-            f"_bg_t{normalized_background[0] + 1}_h{normalized_background[1] + 1}_w{normalized_background[2] + 1}.mp4"
-        ),
-        overlay_frames,
-        fps=latent_fps,
+    frame_indices = [int(index) for index in metadata.get("frame_indices", [])]
+    video_metadata = metadata.get("video_metadata", {})
+    display_fps = infer_latent_fps(frame_indices, float(video_metadata.get("fps", 0.0) or 0.0), tubelet_size=int(metadata.get("tubelet_size", 2) or 2))
+    video_path = output_dir / (
+        f"vos_segmentation_fg_t{int(foreground_token[0])}-h{int(foreground_token[1])}-w{int(foreground_token[2])}"
+        f"_bg_t{int(background_token[0])}-h{int(background_token[1])}-w{int(background_token[2])}.mp4"
     )
-    foreground_ratio_per_frame = tuple(float(frame_mask.mean()) for frame_mask in segmentation_volume)
+    write_video(video_path, overlay_frames, fps=display_fps)
+
+    foreground_ratio_per_frame = tuple(float(mask.mean()) for mask in segmentation_volume)
     return SegmentationArtifacts(
-        segmentation_video_path=output_path,
-        segmentation_video_shape=tuple(overlay_frames.shape),
-        display_fps=latent_fps,
-        foreground_token=normalized_foreground,
-        background_token=normalized_background,
-        knn_neighbors=max(1, int(k_neighbors)),
+        segmentation_video_path=video_path,
+        segmentation_video_shape=tuple(int(value) for value in overlay_frames.shape),
+        display_fps=float(display_fps),
+        foreground_token=tuple(int(value) for value in foreground_token),
+        background_token=tuple(int(value) for value in background_token),
+        knn_neighbors=int(k_neighbors),
         temperature=float(temperature),
-        context_frames=max(0, int(context_frames)),
-        spatial_radius=max(0, int(spatial_radius)),
+        context_frames=int(context_frames),
+        spatial_radius=int(spatial_radius),
         foreground_ratio_per_frame=foreground_ratio_per_frame,
     )

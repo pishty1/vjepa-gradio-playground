@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as torch_f
 
-from .extractor_config import IMAGENET_MEAN, IMAGENET_STD, normalize_crop_size
+from .config import IMAGENET_MEAN, IMAGENET_STD, normalize_crop_size
 
 
 def probe_video(video_path: Path) -> dict[str, Any]:

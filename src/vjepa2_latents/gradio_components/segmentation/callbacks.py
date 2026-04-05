@@ -5,7 +5,7 @@ from typing import Any
 
 import gradio as gr
 
-from ..gradio_utils import (
+from ...gradio_utils import (
     _format_hint_status,
     _format_segmentation_prompt_status,
     _format_segmentation_ready_status,
@@ -15,9 +15,13 @@ from ..gradio_utils import (
     _serialize_json,
     _tracking_frame_choices,
 )
-from ..visualization import load_aligned_source_frames, load_saved_latents, map_click_to_latent_token
-from .core import annotate_prompt_points, create_segmentation_video
-
+from ..projection import load_saved_latents
+from ..render.video import load_aligned_source_frames
+from ..tracking.core import map_click_to_latent_token
+from .core import (
+    annotate_prompt_points,
+    create_segmentation_video,
+)
 
 
 def prepare_segmentation_step(latent_state: dict[str, Any] | None, segmentation_frame_index: int | str | None = 0):
@@ -86,7 +90,6 @@ def prepare_segmentation_step(latent_state: dict[str, Any] | None, segmentation_
         segmentation_state,
         None,
     )
-
 
 
 def select_segmentation_prompt_step(
@@ -178,7 +181,6 @@ def select_segmentation_prompt_step(
         _serialize_json(payload),
         next_segmentation_state,
     )
-
 
 
 def run_segmentation_step(

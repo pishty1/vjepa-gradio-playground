@@ -40,8 +40,6 @@ def parse_crop_size(value: str) -> int | tuple[int, int]:
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """Static information needed to construct and load a specific checkpoint."""
-
     arch_name: str
     checkpoint_keys: tuple[str, ...]
     checkpoint_url: str

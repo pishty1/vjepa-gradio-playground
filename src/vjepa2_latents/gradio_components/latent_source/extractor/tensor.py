@@ -9,7 +9,7 @@ import einops
 import numpy as np
 import torch
 
-from .extractor_logging import log_step, log_timing
+from .utils.logging import log_step, log_timing
 
 
 def _synchronize_device(device: torch.device) -> None:

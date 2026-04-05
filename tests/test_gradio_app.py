@@ -1,7 +1,9 @@
 from pathlib import Path
+import os
 import sys
 import unittest
 import numpy as np
+import json
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -26,8 +28,10 @@ from vjepa2_latents.gradio_app import (
     select_patch_similarity_step,
     _summarize_timings_for_ui,
     extract_latents_step,
+    load_latents_step,
     toggle_projection_controls,
 )
+from vjepa2_latents.gradio_components.latent_source.catalog import saved_latent_choices
 
 
 class GradioMetadataCleanupTests(unittest.TestCase):
@@ -121,10 +125,10 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             }
 
             with (
-                patch("vjepa2_latents.gradio_app._resolve_video_path", return_value=video_path),
-                patch("vjepa2_latents.gradio_app._create_session_dir", return_value=session_dir),
-                patch("vjepa2_latents.gradio_app.extract_latents", return_value=fake_result),
-                patch("vjepa2_latents.gradio_app.load_saved_latents", return_value=(np.zeros((1, 1, 1, 1, 3), dtype=np.float32), {"latent_grid_shape": [1, 1, 1, 1, 3], "frame_indices": [0], "video_path": str(video_path), "video_metadata": {"fps": 24.0}, "tubelet_size": 2, "crop_size": [256, 256]})),
+                patch("vjepa2_latents.gradio_components.latent_source.callbacks._resolve_video_path", return_value=video_path),
+                patch("vjepa2_latents.gradio_components.latent_source.callbacks._create_session_dir", return_value=session_dir),
+                patch("vjepa2_latents.gradio_components.latent_source.callbacks.extract_latents", return_value=fake_result),
+                patch("vjepa2_latents.gradio_components.latent_source.callbacks.load_saved_latents", return_value=(np.zeros((1, 1, 1, 1, 3), dtype=np.float32), {"latent_grid_shape": [1, 1, 1, 1, 3], "frame_indices": [0], "video_path": str(video_path), "video_metadata": {"fps": 24.0}, "tubelet_size": 2, "crop_size": [256, 256]})),
             ):
                 status, latent_prefix, metadata_json, latent_state, *_ = extract_latents_step(
                     video_file=str(video_path),
@@ -142,6 +146,78 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             self.assertEqual(latent_state["output_prefix"], str(session_dir / "latents"))
             self.assertFalse((session_dir / video_path.name).exists())
             self.assertIn(f'"video_name": "{video_path.name}"', metadata_json)
+
+    def test_saved_latent_choices_include_metadata_rich_labels(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            older_dir = base / "vjepa2-extract-old"
+            newer_dir = base / "vjepa2-extract-new"
+            older_dir.mkdir()
+            newer_dir.mkdir()
+
+            older_prefix = older_dir / "latents"
+            newer_prefix = newer_dir / "latents"
+            older_prefix.with_suffix(".npy").write_bytes(b"old")
+            newer_prefix.with_suffix(".npy").write_bytes(b"new")
+            older_prefix.with_suffix(".metadata.json").write_text(
+                json.dumps(
+                    {
+                        "video_path": "/tmp/skate.mp4",
+                        "model": "vit_large_384",
+                        "frame_indices": list(range(16)),
+                        "crop_size": [384, 384],
+                        "latent_grid_shape": [1, 8, 24, 24, 1024],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            newer_prefix.with_suffix(".metadata.json").write_text(
+                json.dumps(
+                    {
+                        "video_path": "/tmp/runner.mp4",
+                        "model": "vit_base_384",
+                        "frame_indices": list(range(8)),
+                        "crop_size": [256, 384],
+                        "latent_grid_shape": [1, 4, 16, 24, 768],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            older_metadata = older_prefix.with_suffix(".metadata.json")
+            newer_metadata = newer_prefix.with_suffix(".metadata.json")
+            os.utime(older_metadata, (1_700_000_000, 1_700_000_000))
+            os.utime(newer_metadata, (1_800_000_000, 1_800_000_000))
+
+            choices = saved_latent_choices(base)
+
+            self.assertEqual(choices[0][1], str(newer_prefix))
+            self.assertIn("runner.mp4", choices[0][0])
+            self.assertIn("vit_base_384", choices[0][0])
+            self.assertIn("8f", choices[0][0])
+            self.assertIn("256x384", choices[0][0])
+            self.assertIn("latent=4x16x24", choices[0][0])
+
+    def test_load_latents_step_accepts_saved_list_selection(self) -> None:
+        latent_grid = np.zeros((1, 2, 4, 4, 3), dtype=np.float32)
+        metadata = {
+            "latent_grid_shape": [1, 2, 4, 4, 3],
+            "input_tensor_shape": [1, 3, 4, 384, 384],
+            "raw_token_shape": [1, 32, 3],
+        }
+
+        with patch("vjepa2_latents.gradio_components.latent_source.callbacks.load_saved_latents", return_value=(latent_grid, metadata)):
+            status, latent_prefix, payload_json, next_state, *_ = load_latents_step(
+                "/tmp/example_latents",
+                None,
+                None,
+                None,
+            )
+
+        expected_prefix = str(Path("/tmp/example_latents").resolve())
+        self.assertIn("Latents loaded", status)
+        self.assertEqual(latent_prefix, expected_prefix)
+        self.assertIn(f'"latent_output_prefix": "{expected_prefix}"', payload_json)
+        self.assertEqual(next_state["output_prefix"], expected_prefix)
 
     def test_plot_and_render_steps_use_cached_state(self) -> None:
         projection = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
@@ -179,15 +255,15 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             display_fps=24.0,
         )
 
-        with patch("vjepa2_latents.gradio_app.load_saved_projection", side_effect=AssertionError("disk should not be hit")):
+        with patch("vjepa2_latents.gradio_components.plot.callbacks.load_saved_projection", side_effect=AssertionError("disk should not be hit")):
             figure, plot_status = build_plot_step(projection_state, 2, 500, 1, 2, None)
             self.assertIsNotNone(figure)
             self.assertIn("Plot updated", plot_status)
 
         with (
-            patch("vjepa2_latents.gradio_app.load_saved_projection", side_effect=AssertionError("disk should not be hit")),
-            patch("vjepa2_latents.gradio_app._load_latent_metadata", side_effect=AssertionError("disk should not be hit")),
-            patch("vjepa2_latents.gradio_app.create_visualizations_from_projection", return_value=dummy_artifacts),
+            patch("vjepa2_latents.gradio_components.render.callbacks.load_saved_projection", side_effect=AssertionError("disk should not be hit")),
+            patch("vjepa2_latents.gradio_components.render.callbacks._load_latent_metadata", side_effect=AssertionError("disk should not be hit")),
+            patch("vjepa2_latents.gradio_components.render.callbacks.create_visualizations_from_projection", return_value=dummy_artifacts),
         ):
             status, video_path, payload_json = create_rgb_videos_step(latent_state, projection_state, 1, 2, 3, 2)
 
@@ -219,7 +295,7 @@ class GradioMetadataCleanupTests(unittest.TestCase):
             component_labels=("PC1", "PC2"),
         )
 
-        with patch("vjepa2_latents.gradio_app.compute_projection_bundle") as bundle_mock:
+        with patch("vjepa2_latents.gradio_components.projection.callbacks.compute_projection_bundle") as bundle_mock:
             bundle_mock.return_value = {
                 "projection": np.zeros((8, 2), dtype=np.float32),
                 "coordinates": np.zeros((8, 3), dtype=np.int32),
@@ -230,7 +306,7 @@ class GradioMetadataCleanupTests(unittest.TestCase):
                 "explained_variance": [1.0, 0.0],
                 "settings": {"method": "pca", "method_label": "Spatial-only PCA", "pca_mode": "spatial", "n_components": 2, "umap_n_neighbors": 15, "umap_min_dist": 0.1, "umap_metric": "euclidean", "umap_random_state": 42, "projection_backend": "numpy-svd"},
             }
-            with patch("vjepa2_latents.gradio_app.save_projection_artifacts", return_value=artifacts):
+            with patch("vjepa2_latents.gradio_components.projection.callbacks.save_projection_artifacts", return_value=artifacts):
                 compute_projection_step(latent_state, "PCA", "spatial", 2, 15, 0.1, "euclidean", 42)
 
         self.assertEqual(bundle_mock.call_args.kwargs["pca_mode"], "spatial")
@@ -250,7 +326,7 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         source_frames = np.zeros((2, 48, 48, 3), dtype=np.uint8)
         source_frames[1, :, :, :] = 99
 
-        with patch("vjepa2_latents.gradio_app.load_aligned_source_frames", return_value=(source_frames, 6.0, [12, 14])):
+        with patch("vjepa2_latents.gradio_components.tracking.callbacks.load_aligned_source_frames", return_value=(source_frames, 6.0, [12, 14])):
             frame_update, preview, status, metadata_json, tracking_state, video_path = prepare_tracking_step(latent_state, 1)
 
         self.assertEqual(frame_update["choices"], [("Frame 1 (video frame 12)", 0), ("Frame 2 (video frame 14)", 1)])
@@ -293,8 +369,8 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         )
 
         with (
-            patch("vjepa2_latents.gradio_app.load_aligned_source_frames", side_effect=AssertionError("cached frames should be reused")),
-            patch("vjepa2_latents.gradio_app.create_patch_similarity_video", return_value=artifacts) as create_mock,
+            patch("vjepa2_latents.gradio_components.tracking.callbacks.load_aligned_source_frames", side_effect=AssertionError("cached frames should be reused")),
+            patch("vjepa2_latents.gradio_components.tracking.callbacks.create_patch_similarity_video", return_value=artifacts) as create_mock,
         ):
             preview, status, video_path, metadata_json, next_state = select_patch_similarity_step(
                 latent_state,
@@ -325,7 +401,7 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         source_frames = np.zeros((2, 48, 48, 3), dtype=np.uint8)
         source_frames[1, :, :, :] = 77
 
-        with patch("vjepa2_latents.gradio_app.load_aligned_source_frames", return_value=(source_frames, 6.0, [12, 14])):
+        with patch("vjepa2_latents.gradio_components.segmentation.callbacks.load_aligned_source_frames", return_value=(source_frames, 6.0, [12, 14])):
             frame_update, preview, status, metadata_json, segmentation_state, video_path = prepare_segmentation_step(latent_state, 1)
 
         self.assertEqual(frame_update["choices"], [("Frame 1 (video frame 12)", 0)])
@@ -394,8 +470,8 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         self.assertEqual(next_state2["prompt_tokens"]["background"], [0, 3, 0])
 
         with (
-            patch("vjepa2_latents.gradio_app.load_aligned_source_frames", side_effect=AssertionError("cached frames should be reused")),
-            patch("vjepa2_latents.gradio_app.create_segmentation_video", return_value=segmentation_artifacts) as create_mock,
+            patch("vjepa2_latents.gradio_components.segmentation.callbacks.load_aligned_source_frames", side_effect=AssertionError("cached frames should be reused")),
+            patch("vjepa2_latents.gradio_components.segmentation.callbacks.create_segmentation_video", return_value=segmentation_artifacts) as create_mock,
         ):
             status3, video_path, metadata_json3, next_state3 = run_segmentation_step(latent_state, next_state2, 1)
 

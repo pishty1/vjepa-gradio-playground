@@ -9,29 +9,37 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vjepa2_latents.visualization import (
-    _ensure_even_frame_size,
-    annotate_prompt_points,
-    annotate_selected_patch,
+from vjepa2_latents.gradio_components.plot import (
     build_projection_figure,
     build_projection_figure_from_data,
-    cosine_similarity_volume,
-    compute_projection_bundle,
-    compute_pca_projection,
-    compute_umap_projection,
+)
+from vjepa2_latents.gradio_components.projection import (
     compute_mlx_projection,
+    compute_pca_projection,
+    compute_projection_bundle,
+    compute_umap_projection,
     has_umap_support,
-    infer_latent_fps,
-    knn_binary_segmentation_volume,
-    latent_rgb_frames,
     load_saved_projection,
-    map_click_to_latent_token,
     projection_method_display_name,
-    projection_rgb_frames,
     save_projection_artifacts,
-    segmentation_mask_frames,
-    similarity_heatmap_frames,
+)
+from vjepa2_latents.gradio_components.render import (
+    _ensure_even_frame_size,
+    infer_latent_fps,
+    latent_rgb_frames,
+    projection_rgb_frames,
     side_by_side_frames,
+)
+from vjepa2_latents.gradio_components.segmentation import (
+    annotate_prompt_points,
+    knn_binary_segmentation_volume,
+    segmentation_mask_frames,
+)
+from vjepa2_latents.gradio_components.tracking import (
+    annotate_selected_patch,
+    cosine_similarity_volume,
+    map_click_to_latent_token,
+    similarity_heatmap_frames,
 )
 
 
@@ -100,7 +108,7 @@ class ProjectionArtifactTests(unittest.TestCase):
 class MlxProjectionTests(unittest.TestCase):
     def test_missing_mlx_vis_dependency_raises_clear_error(self) -> None:
         features = np.random.default_rng(7).normal(size=(16, 8)).astype(np.float32)
-        with mock.patch("vjepa2_latents.visualization.has_mlx_vis_support", return_value=False):
+        with mock.patch("vjepa2_latents.gradio_components.projection.core.has_mlx_vis_support", return_value=False):
             with self.assertRaisesRegex(RuntimeError, "mlx-vis"):
                 compute_mlx_projection(features, method="umap_mlx", n_components=2)
 
@@ -118,8 +126,8 @@ class MlxProjectionTests(unittest.TestCase):
         fake_module = type("FakeMlxVis", (), {"TSNE": FakeTSNE})
 
         with (
-            mock.patch("vjepa2_latents.visualization.has_mlx_vis_support", return_value=True),
-            mock.patch("vjepa2_latents.visualization.importlib.import_module", return_value=fake_module),
+            mock.patch("vjepa2_latents.gradio_components.projection.core.has_mlx_vis_support", return_value=True),
+            mock.patch("vjepa2_latents.gradio_components.projection.core.importlib.import_module", return_value=fake_module),
         ):
             bundle = compute_projection_bundle(
                 latent_grid,
@@ -298,12 +306,12 @@ class VideoWriteHelpersTests(unittest.TestCase):
     def test_write_video_uses_ffmpeg_h264_yuv420p(self) -> None:
         frames = np.zeros((2, 10, 12, 3), dtype=np.uint8)
 
-        with mock.patch("vjepa2_latents.visualization._resolve_ffmpeg_executable", return_value="ffmpeg"):
-            with mock.patch("vjepa2_latents.visualization.subprocess.run") as run_mock:
+        with mock.patch("vjepa2_latents.gradio_components.render.video._resolve_ffmpeg_executable", return_value="ffmpeg"):
+            with mock.patch("vjepa2_latents.gradio_components.render.video.subprocess.run") as run_mock:
                 run_mock.return_value = mock.Mock(returncode=0, stderr=b"")
                 output = _ensure_even_frame_size(frames)
                 self.assertEqual(output.shape, (2, 10, 12, 3))
-                from vjepa2_latents.visualization import write_video
+                from vjepa2_latents.gradio_components.render import write_video
 
                 with tempfile.TemporaryDirectory() as temp_dir:
                     video_path = Path(temp_dir) / "test.mp4"

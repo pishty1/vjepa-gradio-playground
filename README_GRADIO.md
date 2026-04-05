@@ -1,8 +1,8 @@
 # Gradio UI guide
 
-This document describes the current Gradio app in this workspace, the staged latent-space workflow it exposes, and the related extractor and visualization changes that support it.
+This document describes the current Gradio app in this workspace, the staged latent-space workflow it exposes, and the component-local modules that support it.
 
-For a VOS-only explanation grounded in both the current code and the V-JEPA 2.1 paper, see `src/vjepa2_latents/vos/README.md`.
+For a VOS-only explanation grounded in both the current code and the V-JEPA 2.1 paper, see `src/vjepa2_latents/gradio_components/segmentation/README.md`.
 
 ## Purpose
 
@@ -11,16 +11,15 @@ The app provides a browser UI for exploring V-JEPA 2.1 latents without opening t
 It supports a staged workflow where each step can run independently:
 
 1. estimate whether an extraction configuration is likely to fit the selected device
-2. extract latents from a video
-3. load previously saved latent artifacts
-4. compute PCA, `umap-learn`, or `mlx-vis` projections with custom parameters
+2. either extract new latents from a video or load a previously saved latent run
+3. compute PCA, `umap-learn`, or `mlx-vis` projections with custom parameters
   - PCA supports global, spatial-only, and temporal-only modes
-5. load previously saved projection artifacts
-6. build a 2D or 3D interactive plot from chosen projection components
-7. generate RGB latent videos from any selected 3 projection components
-8. generate a side-by-side source/latent comparison video
-9. click a patch in the first frame and render a cosine-similarity tracking heatmap over time
-10. click one foreground point and one background point, then render a KNN-based binary segmentation mask video
+4. load previously saved projection artifacts
+5. build a 2D or 3D interactive plot from chosen projection components
+6. generate RGB latent videos from any selected 3 projection components
+7. generate a side-by-side source/latent comparison video
+8. click a patch in the first frame and render a cosine-similarity tracking heatmap over time
+9. click one foreground point and one background point, then render a KNN-based binary segmentation mask video
 
 ## Files
 
@@ -43,8 +42,7 @@ Current responsibilities:
 - keep loaded latent grids and projections in `gr.State` between button clicks
 - wire the per-stage Gradio callbacks and return values
 - estimate extraction pressure before a run with `estimate_limits_step()`
-- run extraction independently from visualization
-- load saved latent `.npy` and `.metadata.json` artifacts
+- delegate the merged latent-source flow to the modular latent-source package
 - compute or load reusable PCA, `umap-learn`, or `mlx-vis` projection artifacts
 - support global, spatial-only, and temporal-only PCA modes
 - update component selectors dynamically based on projected dimensionality
@@ -60,6 +58,69 @@ Current responsibilities:
 - return status and JSON metadata for each stage separately
 - emit concise `[vjepa2]` console progress logs for the main Gradio stages
 
+### `src/vjepa2_latents/gradio_components/latent_source/`
+
+Modular latent-source package for the merged first UI section.
+
+Current responsibilities:
+
+- define latent-source-specific constants such as default video/model/device values
+- build the first Gradio section UI in its own module
+- keep extraction and latent-loading callbacks outside the main UI file
+- keep latent-source-specific formatting, path, and session helpers local to the component
+- scan `.gradio_outputs/` for reusable latent runs
+- build metadata-rich labels for saved latent selections
+- refresh the saved-latent picker after new extractions or imported latent files
+- toggle between the extract and load sub-views in the merged source section
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/`
+
+Component-local extractor implementation package for the latent-source workflow.
+
+Current responsibilities:
+
+- keep extractor code grouped by responsibility beside the latent-source component
+- expose the same public API through `src/vjepa2_latents/extractor.py`
+- keep the CLI entrypoint available through `python -m vjepa2_latents.gradio_components.latent_source.extractor`
+
+Package layout:
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/config.py`
+
+- define `ModelSpec`, `MODEL_SPECS`, image-normalization constants, crop parsing, and device selection
+- provide memory and token-estimation helpers used by preflight checks
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/checkpoint.py`
+
+- validate, download, and load checkpoints
+- expose vendored upstream `app/...` imports safely
+- construct the upstream encoder and load pretrained weights
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/video.py`
+
+- probe video metadata
+- select frame windows and decode source frames
+- apply resize, crop, and model-input preprocessing helpers
+- prepare display-aligned source frames for visualization
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/tensor.py`
+
+- run the encoder synchronously for accurate timing
+- reshape flat tokens back into the latent spatiotemporal grid
+- serialize `.npy`, optional `.pt`, and metadata outputs
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/pipeline.py`
+
+- orchestrate end-to-end extraction
+- expose `estimate_extraction_requirements()`
+- define the CLI parser and `main()` entrypoint
+
+### `src/vjepa2_latents/gradio_components/latent_source/extractor/utils/logging.py`
+
+- keep shared extractor logging and timing helpers
+
+The logging helpers now focus on structured `[vjepa2]` console output and timing summaries.
+
 ### `src/vjepa2_latents/gradio_utils.py`
 
 Shared Gradio helper layer.
@@ -73,7 +134,7 @@ Current responsibilities:
 - build the `gr.State` payloads for latents and projections
 - keep the small console logging helper used by the Gradio callbacks
 
-### `src/vjepa2_latents/projection.py`
+### `src/vjepa2_latents/gradio_components/projection/core.py`
 
 Projection-specific helpers.
 
@@ -86,75 +147,65 @@ Current responsibilities:
 - persist reusable projection bundles and load them back from disk
 - summarize latent tensors for UI display
 
-### `src/vjepa2_latents/video.py`
+### `src/vjepa2_latents/gradio_components/plot/core.py`
 
-Plotting and media-rendering helpers.
+Plot-specific helpers.
 
 Current responsibilities:
 
 - build Plotly figures from latent tensors or saved projections
-- convert chosen projection components into RGB frames
-- compose side-by-side videos with aspect-ratio-aware padding
-- map clicked image coordinates to latent token indices
-- compute token-to-token cosine similarity volumes
-- classify latent tokens with a small foreground/background KNN
-- blend hotspot-focused similarity heatmaps over source frames
-- blend binary segmentation masks over source frames and annotate prompt points
-- export browser-friendly `.mp4` outputs with `ffmpeg`
+- validate selected component indices for 2D and 3D plots
+- label axes using the projection-method-aware component naming helpers
 
-### `src/vjepa2_latents/visualization.py`
+### `src/vjepa2_latents/gradio_components/render/video.py`
 
-Compatibility facade for the visualization helpers.
+Render and media-export helpers.
 
 Current responsibilities:
 
-- re-export the public visualization API for existing imports
-- keep the test-friendly compatibility hooks on the legacy module path
-- bridge the split implementation in `projection.py` and `video.py`
+- convert chosen projection components into RGB frames
+- infer display FPS for latent-aligned video exports
+- load and crop source frames so they align with the latent grid
+- compose side-by-side videos with aspect-ratio-aware padding
+- export browser-friendly `.mp4` outputs with `ffmpeg`
+
+### `src/vjepa2_latents/gradio_components/tracking/core.py`
+
+Tracking-specific similarity helpers.
+
+Current responsibilities:
+
+- map clicked image coordinates to latent token indices
+- compute token-to-token cosine similarity volumes
+- annotate the selected or peak-response patch on preview frames
+- blend hotspot-focused similarity heatmaps over source frames
+- export patch-similarity tracking videos
 
 ### `src/vjepa2_latents/extractor.py`
 
 Public extractor API and orchestration layer reused by the UI.
 
-It now delegates to smaller helper modules so the pipeline is easier to maintain while keeping the existing import path stable.
+It now re-exports the latent-source-local extractor package while keeping the existing import path stable.
 
 Current responsibilities:
 
 - expose the stable extractor API used by the Gradio app, tests, and CLI wrapper
-- keep patch-friendly wrappers for checkpoint download and extraction preflight helpers
-- orchestrate the full end-to-end extraction pipeline and CLI entrypoint
+- act as the compatibility facade for the extractor code now stored under the latent-source component
 
-Supporting extractor modules:
+### `src/vjepa2_latents/gradio_components/segmentation/`
 
-### `src/vjepa2_latents/extractor_config.py`
+Reusable segmentation component package.
 
-- define `ModelSpec`, `MODEL_SPECS`, image-normalization constants, crop parsing, and device selection
-- provide memory and token-estimation helpers used by preflight checks
+This folder now cleanly holds both the Gradio-tab wiring and the non-UI VOS domain logic that belongs with the segmentation feature.
 
-### `src/vjepa2_latents/extractor_checkpoint.py`
+Current responsibilities:
 
-- validate, download, and load checkpoints
-- expose vendored upstream `app/...` imports safely
-- construct the upstream encoder and load pretrained weights
+- keep VOS propagation and rendering logic in `core.py`
+- keep VOS-specific status-formatting helpers in `status.py`
+- keep the segmentation UI and callbacks beside the feature-specific core logic
+- provide a focused `README.md` for the VOS feature area
 
-### `src/vjepa2_latents/extractor_video.py`
-
-- probe video metadata
-- select frame windows and decode source frames
-- apply resize, crop, and model-input preprocessing helpers
-- prepare display-aligned source frames for visualization
-
-### `src/vjepa2_latents/extractor_tensor.py`
-
-- run the encoder synchronously for accurate timing
-- reshape flat tokens back into the latent spatiotemporal grid
-- serialize `.npy`, optional `.pt`, and metadata outputs
-
-### `src/vjepa2_latents/extractor_logging.py`
-
-- keep shared extractor logging and timing helpers
-
-The logging helpers now focus on structured `[vjepa2]` console output and timing summaries.
+The old top-level `video.py`, `visualization.py`, and `vos.py` files are removed so plotting, rendering, tracking, and segmentation logic now live beside their owning Gradio components.
 
 The extractor stack still supports the same workflow features:
 
@@ -230,9 +281,16 @@ browser UI
 
 ## Current UI layout
 
-The app is built in `build_demo()` and split into 6 main sections plus a second analysis tab for VOS-style segmentation, with a preflight estimate action inside the extraction section.
+The app is built in `build_demo()` and split into 4 main sections plus analysis tabs for tracking and VOS, with a merged latent-source section at the top.
 
-### 1. Extract latents from video
+### 1. Choose latent source
+
+The first section now asks the user to choose between:
+
+- `Extract new latents`
+- `Load saved latents`
+
+#### Extract new latents
 
 Inputs:
 
@@ -264,24 +322,34 @@ Notes:
 - on macOS, the default device is `mps`
 - Gradio extraction calls `extract_latents(..., save_pt=False)`, so the UI path persists `.npy` and `.metadata.json` but skips `.pt`
 
-### 2. Load latent space
+#### Load saved latents
 
 Inputs:
 
-- latent prefix textbox
+- saved latent-run picker populated from `.gradio_outputs/`
 - optional latent `.npy` upload
 - optional latent `.json` metadata upload
 
+Saved-run labels include a timestamp plus available metadata such as:
+
+- source video name
+- model name
+- frame count
+- crop size
+- latent-grid dimensions
+
 Button:
 
+- `Refresh saved runs`
 - `Load latents`
 
 Outputs:
 
+- active latent prefix textbox
 - latent summary status
 - latent summary JSON, collapsed by default
 
-### 3. Compute or load a projection
+### 2. Compute or load a projection
 
 Inputs:
 
@@ -313,7 +381,7 @@ Behavior:
 - 3D plotting is disabled automatically when fewer than 3 components exist
 - MLX reducers raise a clear install hint when `mlx-vis` is not available
 
-### 4. Build a plot from chosen projection components
+### 3. Build a plot from chosen projection components
 
 Inputs:
 
@@ -330,7 +398,7 @@ Outputs:
 - interactive Plotly figure
 - plot status
 
-### 5. Create RGB latent videos from chosen projection components
+### 4. Create RGB latent videos from chosen projection components
 
 Inputs:
 
@@ -350,7 +418,7 @@ Note:
 
 - the latent-only RGB video is still written to disk and reported in metadata, but the UI presents the side-by-side video as the main visual output
 
-### 6. Patch Similarity / Dense Tracking
+### 5. Patch Similarity / Dense Tracking
 
 Inputs:
 
@@ -383,7 +451,7 @@ Behavior:
 
 ### 7. Foreground / Background VOS
 
-For the dedicated VOS walkthrough, paper comparison, and code map, see `src/vjepa2_latents/vos/README.md`.
+For the dedicated VOS walkthrough, paper comparison, and code map, see `src/vjepa2_latents/gradio_components/segmentation/README.md`.
 
 Inputs:
 
@@ -415,29 +483,6 @@ Behavior:
 - the resulting binary mask is resized back onto the display frames and blended as a green segmentation overlay
 - the first frame keeps the original foreground/background prompt markers so the segmentation source is obvious
 - this remains a sparse-prompt demo, so it is closer to the paper's propagation mechanics than to its exact dense-mask benchmark protocol
-
-### 2. Load latent space
-
-Inputs:
-
-- latent prefix textbox
-- optional latent `.npy` upload
-- optional latent `.json` metadata upload
-
-Button:
-
-- `Load latents`
-
-Outputs:
-
-- latent summary status
-- latent summary JSON, collapsed by default
-
-### 3. Compute or load a projection
-
-Inputs:
-
-- projection method: `PCA`, `UMAP`, or `mlx-vis` reducers (`UMAP-MLX`, `t-SNE-MLX`, `PaCMAP-MLX`, `LocalMAP-MLX`, `TriMap-MLX`, `DREAMS-MLX`, `CNE-MLX`, `MMAE-MLX`)
 
 These videos are encoded for direct browser playback with H.264 (`libx264`) and `yuv420p`.
 
@@ -574,37 +619,44 @@ Recommended next improvements, in priority order:
 - app bootstrap: `app.py`
 - package exports: `src/vjepa2_latents/__init__.py`
 - UI construction: `src/vjepa2_latents/gradio_app.py::build_demo`
-- extractor orchestration: `src/vjepa2_latents/extractor.py::extract_latents`
-- extractor config helpers: `src/vjepa2_latents/extractor_config.py`
-- extractor checkpoint helpers: `src/vjepa2_latents/extractor_checkpoint.py`
-- extractor video helpers: `src/vjepa2_latents/extractor_video.py`
-- extractor tensor helpers: `src/vjepa2_latents/extractor_tensor.py`
-- extractor logging helpers: `src/vjepa2_latents/extractor_logging.py`
-- estimate step: `src/vjepa2_latents/gradio_app.py::estimate_limits_step`
-- extract step: `src/vjepa2_latents/gradio_app.py::extract_latents_step`
-- latent loading step: `src/vjepa2_latents/gradio_app.py::load_latents_step`
+- latent-source callbacks: `src/vjepa2_latents/gradio_components/latent_source/callbacks.py`
+- saved-latent catalog: `src/vjepa2_latents/gradio_components/latent_source/catalog.py`
+- latent-source config: `src/vjepa2_latents/gradio_components/latent_source/config.py`
+- latent-source helpers: `src/vjepa2_latents/gradio_components/latent_source/helpers.py`
+- latent-source UI builder: `src/vjepa2_latents/gradio_components/latent_source/ui.py`
+- latent-source extractor package: `src/vjepa2_latents/gradio_components/latent_source/extractor/`
+- latent-source extractor pipeline: `src/vjepa2_latents/gradio_components/latent_source/extractor/pipeline.py`
+- latent-source extractor config helpers: `src/vjepa2_latents/gradio_components/latent_source/extractor/config.py`
+- latent-source extractor checkpoint helpers: `src/vjepa2_latents/gradio_components/latent_source/extractor/checkpoint.py`
+- latent-source extractor video helpers: `src/vjepa2_latents/gradio_components/latent_source/extractor/video.py`
+- latent-source extractor tensor helpers: `src/vjepa2_latents/gradio_components/latent_source/extractor/tensor.py`
+- latent-source extractor logging helpers: `src/vjepa2_latents/gradio_components/latent_source/extractor/utils/logging.py`
+- extractor facade: `src/vjepa2_latents/extractor.py`
+- estimate step: `src/vjepa2_latents/gradio_components/latent_source/callbacks.py::estimate_limits_step`
+- extract step: `src/vjepa2_latents/gradio_components/latent_source/callbacks.py::extract_latents_step`
+- latent loading step: `src/vjepa2_latents/gradio_components/latent_source/callbacks.py::load_latents_step`
 - projection step: `src/vjepa2_latents/gradio_app.py::compute_projection_step`
 - projection loading step: `src/vjepa2_latents/gradio_app.py::load_projection_step`
 - plot step: `src/vjepa2_latents/gradio_app.py::build_plot_step`
 - render step: `src/vjepa2_latents/gradio_app.py::create_rgb_videos_step`
-- tracking preview step: `src/vjepa2_latents/gradio_app.py::prepare_tracking_step`
-- tracking click handler: `src/vjepa2_latents/gradio_app.py::select_patch_similarity_step`
-- segmentation preview step: `src/vjepa2_latents/gradio_app.py::prepare_segmentation_step`
-- segmentation click handler: `src/vjepa2_latents/gradio_app.py::select_segmentation_prompt_step`
-- segmentation runner: `src/vjepa2_latents/gradio_app.py::run_segmentation_step`
+- tracking preview step: `src/vjepa2_latents/gradio_components/tracking/callbacks.py::prepare_tracking_step`
+- tracking click handler: `src/vjepa2_latents/gradio_components/tracking/callbacks.py::select_patch_similarity_step`
+- segmentation preview step: `src/vjepa2_latents/gradio_components/segmentation/callbacks.py::prepare_segmentation_step`
+- segmentation click handler: `src/vjepa2_latents/gradio_components/segmentation/callbacks.py::select_segmentation_prompt_step`
+- segmentation runner: `src/vjepa2_latents/gradio_components/segmentation/callbacks.py::run_segmentation_step`
 - shared Gradio helpers: `src/vjepa2_latents/gradio_utils.py`
-- projection helpers: `src/vjepa2_latents/projection.py::compute_projection_bundle`
-- optional MLX reducer helper: `src/vjepa2_latents/projection.py::compute_mlx_projection`
-- saved projection loading: `src/vjepa2_latents/projection.py::load_saved_projection`
-- projection summary helper: `src/vjepa2_latents/projection.py::summarize_latents`
-- plot builder from saved data: `src/vjepa2_latents/video.py::build_projection_figure_from_data`
-- RGB rendering from selected components: `src/vjepa2_latents/video.py::projection_rgb_frames`
-- side-by-side media export: `src/vjepa2_latents/video.py::create_visualizations_from_projection`
-- click-to-token mapping: `src/vjepa2_latents/video.py::map_click_to_latent_token`
-- dense similarity computation: `src/vjepa2_latents/video.py::cosine_similarity_volume`
-- tracking video export: `src/vjepa2_latents/video.py::create_patch_similarity_video`
-- VOS token classification: `src/vjepa2_latents/video.py::knn_binary_segmentation_volume`
-- segmentation video export: `src/vjepa2_latents/video.py::create_segmentation_video`
+- projection helpers: `src/vjepa2_latents/gradio_components/projection/core.py::compute_projection_bundle`
+- optional MLX reducer helper: `src/vjepa2_latents/gradio_components/projection/core.py::compute_mlx_projection`
+- saved projection loading: `src/vjepa2_latents/gradio_components/projection/core.py::load_saved_projection`
+- projection summary helper: `src/vjepa2_latents/gradio_components/projection/core.py::summarize_latents`
+- plot builder from saved data: `src/vjepa2_latents/gradio_components/plot/core.py::build_projection_figure_from_data`
+- RGB rendering from selected components: `src/vjepa2_latents/gradio_components/render/video.py::projection_rgb_frames`
+- side-by-side media export: `src/vjepa2_latents/gradio_components/render/video.py::create_visualizations_from_projection`
+- click-to-token mapping: `src/vjepa2_latents/gradio_components/tracking/core.py::map_click_to_latent_token`
+- dense similarity computation: `src/vjepa2_latents/gradio_components/tracking/core.py::cosine_similarity_volume`
+- tracking video export: `src/vjepa2_latents/gradio_components/tracking/core.py::create_patch_similarity_video`
+- VOS token classification: `src/vjepa2_latents/gradio_components/segmentation/core.py::knn_binary_segmentation_volume`
+- segmentation video export: `src/vjepa2_latents/gradio_components/segmentation/core.py::create_segmentation_video`
 - extractor preflight and crop helpers: `src/vjepa2_latents/extractor.py::estimate_extraction_requirements`, `normalize_crop_size`, `parse_crop_size`, `prepare_display_frames`
 
 ## Local usage

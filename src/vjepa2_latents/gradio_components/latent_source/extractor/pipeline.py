@@ -8,7 +8,7 @@ from typing import Any, Sequence
 
 import torch
 
-from .extractor_checkpoint import (
+from .checkpoint import (
     clean_state_dict,
     download_checkpoint,
     download_checkpoint_if_needed,
@@ -18,8 +18,9 @@ from .extractor_checkpoint import (
     resolve_checkpoint_key,
     validate_checkpoint_file,
 )
-from .extractor_config import (
+from .config import (
     MODEL_SPECS,
+    ModelSpec,
     auto_device,
     estimate_attention_scores_bytes,
     get_mps_memory_info,
@@ -27,23 +28,21 @@ from .extractor_config import (
     normalize_crop_size,
     parse_crop_size,
 )
-from .extractor_logging import (
-    bytes_to_mib,
-    log_step,
-    log_timing,
-    log_timing_summary,
-)
-from .extractor_tensor import (
+from .tensor import (
     reshape_patch_tokens,
     reshape_patch_tokens_with_timings,
     run_encoder_synchronously,
     save_outputs,
 )
-from .extractor_video import (
+from .utils.logging import bytes_to_mib, log_step, log_timing, log_timing_summary
+from .video import (
+    center_crop,
     prepare_display_frames,
+    prepare_video_frames,
     preprocess_video,
     probe_video,
     read_video_frames,
+    resize_to_cover,
     select_frame_indices,
 )
 
@@ -262,228 +261,104 @@ def extract_latents(
     metadata = {
         "video_path": str(video_path),
         "video_name": video_path.name,
-        "model": model_name,
-        "device": str(device),
-        "checkpoint_path": str(resolved_checkpoint),
         "video_metadata": video_meta,
-        "frame_indices": frame_indices,
-        "input_tensor_shape": input_shape,
-        "raw_token_shape": raw_token_shape,
-        "tokens_stripped": stripped,
-        "latent_grid_shape": latent_grid_shape,
-        "patch_size": 16,
-        "tubelet_size": 2,
+        "model_name": model_name,
+        "model_spec": {
+            "arch_name": spec.arch_name,
+            "embed_dim": spec.embed_dim,
+            "num_heads": spec.num_heads,
+            "native_resolution": spec.native_resolution,
+        },
+        "checkpoint_path": str(resolved_checkpoint),
+        "device": str(device),
         "crop_size": [crop_height, crop_width],
-        "native_checkpoint_resolution": spec.native_resolution,
+        "num_frames": int(num_frames),
+        "sample_fps": None if sample_fps is None else float(sample_fps),
+        "start_frame": int(start_frame),
+        "start_second": None if start_second is None else float(start_second),
+        "frame_indices": frame_indices,
+        "tubelet_size": 2,
+        "input_tensor_shape": input_shape,
+        "raw_patch_tokens_shape": raw_token_shape,
+        "latent_grid_shape": latent_grid_shape,
+        "tokens_stripped": int(stripped),
+        "estimated_attention_scores_bytes": int(estimated_attention_scores_bytes),
         "timings": {
-            "encoder_forward_pass": {
-                "measured_synchronously": True,
-                "forward_run_seconds": encoder_forward_seconds,
-                "total_wall_seconds": encoder_forward_seconds,
-            },
+            "major_phases": major_phase_timings,
+            "encoder_setup": encoder_setup_timings,
             "reshape_patch_tokens": reshape_timings,
         },
-        "notes": [
-            "V-JEPA 2.1 checkpoints are trained at 384 resolution.",
-            "This extractor supports smaller inference crops such as 256 via RoPE-enabled variable-size inference.",
-            "The PyTorch encoder in the official repo does not usually emit an extra modality token; stripping is automatic only if the token count is off by one.",
-            "The encoder call blocks until device work completes so timing reflects wall-clock execution.",
-        ],
     }
-    cleanup_start = time.perf_counter()
-    del encoder
-    del video_tensor
-    del frames
-    del raw_tokens
-    if device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
-        torch.mps.empty_cache()
-    major_phase_timings["release tensors and clear device cache"] = time.perf_counter() - cleanup_start
 
-    log_step(f"Starting output serialization with prefix {output_prefix}")
-    output_serialization_timings: dict[str, float] = {}
-    output_paths = save_outputs(
+    save_output_timings: dict[str, float] = {}
+    outputs = save_outputs(
         latent_grid=latent_grid,
         output_prefix=output_prefix,
         metadata=metadata,
         save_pt=save_pt,
-        timings_out=output_serialization_timings,
+        timings_out=save_output_timings,
     )
-    metadata["timings"]["output_serialization"] = output_serialization_timings
-    major_phase_timings["serialize outputs"] = output_serialization_timings["total_seconds"]
-
-    finalize_metadata_start = time.perf_counter()
-    metadata["timings"]["total_extraction_seconds"] = time.perf_counter() - extraction_start
-    metadata["timings"]["major_phases"] = major_phase_timings
-    metadata["timings"]["encoder_setup"] = encoder_setup_timings
-    metadata["timings"]["major_phase_subtotal_seconds"] = sum(major_phase_timings.values())
-    metadata["timings"]["major_phase_unaccounted_overhead_seconds"] = max(
-        0.0,
-        metadata["timings"]["total_extraction_seconds"] - metadata["timings"]["major_phase_subtotal_seconds"],
-    )
-    output_paths["metadata"].write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    finalize_metadata_seconds = time.perf_counter() - finalize_metadata_start
-    major_phase_timings["finalize metadata write"] = finalize_metadata_seconds
-    metadata["timings"]["major_phases"] = major_phase_timings
-    metadata["timings"]["major_phase_subtotal_seconds"] = sum(major_phase_timings.values())
-    metadata["timings"]["major_phase_unaccounted_overhead_seconds"] = max(
-        0.0,
-        metadata["timings"]["total_extraction_seconds"] - metadata["timings"]["major_phase_subtotal_seconds"],
-    )
-    output_paths["metadata"].write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-    extraction_summary_timings = {
-        "encoder run": encoder_forward_seconds,
-        "decode video frames": major_phase_timings["decode video frames"],
-        "load encoder": major_phase_timings["load encoder"],
-        "preprocess video clip": major_phase_timings["preprocess video clip"],
-        "resolve checkpoint": major_phase_timings["resolve checkpoint"],
-        "serialize outputs": major_phase_timings["serialize outputs"],
-        "reshape patch tokens": major_phase_timings["reshape patch tokens"],
-    }
-    log_timing_summary(
-        "Extraction timing summary",
-        extraction_summary_timings,
-        metadata["timings"]["total_extraction_seconds"],
-        min_seconds=0.05,
-    )
-    log_timing("total extraction", metadata["timings"]["total_extraction_seconds"])
-    log_step("Extraction complete")
+    major_phase_timings["save outputs"] = save_output_timings.get("total_seconds", 0.0)
+    total_seconds = time.perf_counter() - extraction_start
+    metadata["timings"]["total_seconds"] = total_seconds
+    log_timing_summary("Extraction timing summary", major_phase_timings, total_seconds)
 
     return {
-        "mode": "extract",
+        "video_path": str(video_path),
+        "output_prefix": str(output_prefix),
         "device": str(device),
-        "input_shape": input_shape,
-        "raw_token_shape": raw_token_shape,
-        "latent_shape": latent_grid_shape,
+        "model_name": model_name,
+        "checkpoint_path": str(resolved_checkpoint),
         "frame_indices": frame_indices,
-        "tokens_stripped": stripped,
+        "video_metadata": video_meta,
+        "input_shape": input_shape,
+        "raw_patch_tokens_shape": raw_token_shape,
+        "latent_shape": latent_grid_shape,
+        "tokens_stripped": int(stripped),
+        "estimated_attention_scores_bytes": int(estimated_attention_scores_bytes),
+        "outputs": {key: str(path) for key, path in outputs.items()},
         "timings": metadata["timings"],
-        "outputs": {key: str(value) for key, value in output_paths.items()},
     }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Extract patch-level V-JEPA 2.1 latents from a video clip.")
-    parser.add_argument("--video", type=Path, default=Path("testvideo.mp4"), help="Path to the input video.")
-    parser.add_argument(
-        "--output-prefix",
-        type=Path,
-        default=Path("skate_latents"),
-        help="Output file prefix; .pt, .npy, and .metadata.json are written.",
-    )
-    parser.add_argument(
-        "--vendor-repo",
-        type=Path,
-        default=Path("vendor/vjepa2"),
-        help="Path to the cloned official facebookresearch/vjepa2 repository.",
-    )
-    parser.add_argument(
-        "--model",
-        choices=sorted(MODEL_SPECS),
-        default="vit_large_384",
-        help="Checkpoint/model variant to load.",
-    )
-    parser.add_argument(
-        "--checkpoint-path",
-        type=Path,
-        default=None,
-        help="Optional local checkpoint path. If omitted, the official checkpoint is downloaded into --checkpoint-dir.",
-    )
-    parser.add_argument(
-        "--checkpoint-dir",
-        type=Path,
-        default=Path("checkpoints"),
-        help="Directory for downloaded checkpoints.",
-    )
-    parser.add_argument("--num-frames", type=int, default=16, help="Number of frames in the extracted clip.")
-    parser.add_argument(
-        "--crop-size",
-        type=parse_crop_size,
-        default=256,
-        help="Center crop size. Accepts `N` for square crops or `HxW` for rectangular crops, e.g. `384` or `384x640`.",
-    )
-    parser.add_argument(
-        "--sample-fps",
-        type=float,
-        default=None,
-        help="Optional resampling FPS. Omit to use consecutive frames.",
-    )
-    parser.add_argument("--start-frame", type=int, default=0, help="First source frame to use.")
-    parser.add_argument(
-        "--start-second",
-        type=float,
-        default=None,
-        help="Alternative to --start-frame; overrides it when provided.",
-    )
-    parser.add_argument(
-        "--device",
-        default="auto",
-        help="Device to run on: auto, cpu, cuda, or mps.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run preprocessing and shape math only, without downloading weights or executing the encoder.",
-    )
+    parser = argparse.ArgumentParser(description="Extract V-JEPA 2.1 latent grids from a video clip")
+    parser.add_argument("video", type=Path, help="Input video path")
+    parser.add_argument("output_prefix", type=Path, help="Output path prefix, e.g. outputs/clip")
+    parser.add_argument("--vendor-repo", type=Path, default=Path("vendor/vjepa2"), help="Path to facebookresearch/vjepa2 checkout")
+    parser.add_argument("--model", dest="model_name", default="vit_base_384", choices=sorted(MODEL_SPECS), help="Encoder variant")
+    parser.add_argument("--checkpoint", type=Path, default=None, help="Optional explicit checkpoint path")
+    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints"), help="Where downloaded checkpoints are cached")
+    parser.add_argument("--num-frames", type=int, default=16, help="Number of frames to encode (must be divisible by 2)")
+    parser.add_argument("--crop-size", type=parse_crop_size, default=384, help="Center crop size as INT or HxW, e.g. 384 or 320x512")
+    parser.add_argument("--sample-fps", type=float, default=None, help="Optional temporal sampling FPS")
+    parser.add_argument("--start-frame", type=int, default=0, help="Start frame index")
+    parser.add_argument("--start-second", type=float, default=None, help="Optional start time in seconds")
+    parser.add_argument("--device", dest="device_name", default=None, help="torch device override, e.g. cpu, cuda, mps")
+    parser.add_argument("--dry-run", action="store_true", help="Only validate shapes and selection logic without loading the model")
+    parser.add_argument("--no-save-pt", dest="save_pt", action="store_false", help="Skip writing the .pt latent tensor")
+    parser.set_defaults(save_pt=True)
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_arg_parser().parse_args(argv)
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
     result = extract_latents(
         video_path=args.video,
         output_prefix=args.output_prefix,
         vendor_repo=args.vendor_repo,
-        model_name=args.model,
-        checkpoint_path=args.checkpoint_path,
+        model_name=args.model_name,
+        checkpoint_path=args.checkpoint,
         checkpoint_dir=args.checkpoint_dir,
         num_frames=args.num_frames,
         crop_size=args.crop_size,
         sample_fps=args.sample_fps,
         start_frame=args.start_frame,
         start_second=args.start_second,
-        device_name=args.device,
+        device_name=args.device_name,
         dry_run=args.dry_run,
+        save_pt=args.save_pt,
     )
     print(json.dumps(result, indent=2))
     return 0
-
-
-__all__ = [
-    "MODEL_SPECS",
-    "ModelSpec",
-    "auto_device",
-    "bytes_to_mib",
-    "build_arg_parser",
-    "center_crop",
-    "clean_state_dict",
-    "download_checkpoint",
-    "download_checkpoint_if_needed",
-    "ensure_vendor_imports",
-    "estimate_attention_scores_bytes",
-    "estimate_extraction_requirements",
-    "extract_latents",
-    "get_mps_memory_info",
-    "get_system_memory_bytes",
-    "load_checkpoint_file",
-    "load_encoder",
-    "log_step",
-    "log_timing",
-    "log_timing_summary",
-    "main",
-    "normalize_crop_size",
-    "parse_crop_size",
-    "prepare_display_frames",
-    "prepare_video_frames",
-    "preprocess_video",
-    "probe_video",
-    "read_video_frames",
-    "reshape_patch_tokens",
-    "reshape_patch_tokens_with_timings",
-    "resolve_checkpoint_key",
-    "resize_to_cover",
-    "run_encoder_synchronously",
-    "save_outputs",
-    "select_frame_indices",
-    "validate_checkpoint_file",
-]

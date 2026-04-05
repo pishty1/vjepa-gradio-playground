@@ -6,7 +6,7 @@ import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -149,11 +149,7 @@ def _filtered_constructor_kwargs(constructor: Any, candidate_kwargs: dict[str, A
         name
         for name, parameter in signature.parameters.items()
         if name != "self"
-        and parameter.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
+        and parameter.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
     }
     return {
         key: value
