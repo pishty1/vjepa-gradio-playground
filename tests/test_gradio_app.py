@@ -1,3 +1,4 @@
+from html import unescape
 from pathlib import Path
 import os
 import sys
@@ -217,6 +218,26 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         self.assertIn(f'"latent_output_prefix": "{expected_prefix}"', payload_json)
         self.assertEqual(next_state["output_prefix"], expected_prefix)
 
+    def test_load_latents_step_accepts_legacy_metadata_without_raw_token_shape(self) -> None:
+        latent_grid = np.zeros((1, 2, 4, 4, 3), dtype=np.float32)
+        metadata = {
+            "latent_grid_shape": [1, 2, 4, 4, 3],
+            "input_tensor_shape": [1, 3, 4, 384, 384],
+        }
+
+        with patch("vjepa2_latents.gradio_components.latent_source.callbacks.load_saved_latents", return_value=(latent_grid, metadata)):
+            status, latent_prefix, payload_json, next_state, *_ = load_latents_step(
+                "/tmp/legacy_latents",
+                None,
+            )
+
+        expected_prefix = str(Path("/tmp/legacy_latents").resolve())
+        self.assertIn("Latents loaded", status)
+        self.assertIn("raw tokens", status)
+        self.assertEqual(latent_prefix, expected_prefix)
+        self.assertIn(f'"latent_output_prefix": "{expected_prefix}"', payload_json)
+        self.assertEqual(next_state["output_prefix"], expected_prefix)
+
     def test_plot_and_render_steps_use_cached_state(self) -> None:
         projection = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
         coordinates = np.array([[0, 0, 0]], dtype=np.int32)
@@ -254,9 +275,36 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         )
 
         with patch("vjepa2_latents.gradio_components.plot.callbacks.load_saved_projection", side_effect=AssertionError("disk should not be hit")):
-            figure, plot_status = build_plot_step(projection_state, 2, 500, 1, 2, None)
-            self.assertIsNotNone(figure)
+            figure, plot_status = build_plot_step(projection_state, 2, 500, False, 1, 2, None)
+            self.assertIsInstance(figure, str)
+            self.assertIn("<iframe", figure)
+            self.assertIn("srcdoc=", figure)
             self.assertIn("Plot updated", plot_status)
+
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            preview_path = temp_path / "aligned_source_preview.mp4"
+
+            def _fake_write_video(video_path: Path, frames: np.ndarray, fps: float):
+                video_path.parent.mkdir(parents=True, exist_ok=True)
+                video_path.write_bytes(b"fake-mp4")
+                return video_path
+
+            with (
+                patch("vjepa2_latents.gradio_components.plot.callbacks.load_saved_projection", side_effect=AssertionError("disk should not be hit")),
+                patch("vjepa2_latents.gradio_components.plot.callbacks._load_latent_metadata", return_value=latent_state["metadata"]),
+                patch("vjepa2_latents.gradio_components.plot.callbacks.load_aligned_source_frames", return_value=(np.zeros((1, 32, 32, 3), dtype=np.uint8), 6.0, [0])),
+                patch("vjepa2_latents.gradio_components.plot.callbacks.write_video", side_effect=_fake_write_video),
+            ):
+                figure, plot_status = build_plot_step(projection_state, 2, 500, True, 1, 2, None)
+                self.assertIn("sync-source-video", figure)
+                self.assertIn("sync-plot", figure)
+                sync_payload = unescape(figure)
+                self.assertIn("video.addEventListener('play'", sync_payload)
+                self.assertIn("timeToFrameIndex(video.currentTime", sync_payload)
+                self.assertNotIn("(function() {{", figure)
+                self.assertNotIn("allow-same-origin", figure)
+                self.assertIn("Plot updated", plot_status)
 
         with (
             patch("vjepa2_latents.gradio_components.render.callbacks.load_saved_projection", side_effect=AssertionError("disk should not be hit")),
@@ -305,9 +353,11 @@ class GradioMetadataCleanupTests(unittest.TestCase):
                 "settings": {"method": "pca", "method_label": "Spatial-only PCA", "pca_mode": "spatial", "n_components": 2, "umap_n_neighbors": 15, "umap_min_dist": 0.1, "umap_metric": "euclidean", "umap_random_state": 42, "projection_backend": "numpy-svd"},
             }
             with patch("vjepa2_latents.gradio_components.projection.callbacks.save_projection_artifacts", return_value=artifacts):
-                compute_projection_step(latent_state, "PCA", "spatial", 2, 15, 0.1, "euclidean", 42)
+                result = compute_projection_step(latent_state, "PCA", "spatial", 2, 15, 0.1, "euclidean", 42)
 
         self.assertEqual(bundle_mock.call_args.kwargs["pca_mode"], "spatial")
+        self.assertEqual(result[11]["maximum"], 8)
+        self.assertEqual(result[11]["value"], 8)
 
     def test_prepare_tracking_step_returns_first_frame_and_state(self) -> None:
         latent_state = {

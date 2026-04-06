@@ -42,7 +42,9 @@ def compute_projection_step(
             "{}",
             None,
             *selector_updates,
+            gr.update(),
             None,
+            "",
             _format_hint_status("Plot not ready", "Compute or load a projection before building a plot."),
             _format_hint_status("RGB videos not ready", "Compute or load a projection before generating RGB videos."),
             "{}",
@@ -81,6 +83,7 @@ def compute_projection_step(
     }
     projection_metadata.update(
         {
+            "latent_output_prefix": str(latent_output_prefix),
             "projection_output_prefix": str(projection_output_prefix),
             "projection_npz_path": str(artifacts.projection_path),
             "projection_metadata_path": str(artifacts.metadata_path),
@@ -100,9 +103,11 @@ def compute_projection_step(
             "coordinates": projection_bundle["coordinates"],
         },
         *selector_updates,
-        None,
+        gr.update(minimum=1, maximum=int(projection_bundle["projection"].shape[0]), value=int(projection_bundle["projection"].shape[0])),
         None,
         "",
+        _format_hint_status("Plot not ready", "Build the plot to preview the selected projection components."),
+        _format_hint_status("RGB videos not ready", "Create RGB videos after choosing projection components."),
         "{}",
     )
 
@@ -123,11 +128,20 @@ def load_projection_step(
             "{}",
             projection_state,
             *selector_updates,
+            gr.update(),
+            None,
+            "",
+            _format_hint_status("Plot not ready", "Build the plot to preview the selected projection components."),
+            _format_hint_status("RGB videos not ready", "Create RGB videos after choosing projection components."),
+            "{}",
         )
 
     projection, coordinates, metadata = load_saved_projection(output_prefix)
     payload = {
         **metadata,
+        "latent_output_prefix": metadata.get("latent_output_prefix") or (
+            str(Path(output_prefix).with_name("latents")) if output_prefix is not None else None
+        ),
         "projection_output_prefix": str(output_prefix),
         "projection_shape": list(projection.shape),
     }
@@ -145,4 +159,10 @@ def load_projection_step(
             "metadata": metadata,
         },
         *selector_updates,
+        gr.update(minimum=1, maximum=int(projection.shape[0]), value=int(projection.shape[0])),
+        None,
+        "",
+        _format_hint_status("Plot not ready", "Build the plot to preview the selected projection components."),
+        _format_hint_status("RGB videos not ready", "Create RGB videos after choosing projection components."),
+        "{}",
     )

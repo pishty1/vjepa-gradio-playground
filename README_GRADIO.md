@@ -386,7 +386,8 @@ Behavior:
 Inputs:
 
 - 2D or 3D plot mode
-- max plotted points
+- max plotted points, auto-expanded to the full projection size after compute/load
+- animate over time from `t0` to `tn`
 - chosen X/Y/Z components
 
 Button:
@@ -397,6 +398,12 @@ Outputs:
 
 - interactive Plotly figure
 - plot status
+
+Behavior:
+
+- static mode shows the selected projection components as a single latent-space scatter
+- animation mode adds Plotly play/pause controls and a time slider so you can watch embeddings evolve across successive time steps
+- the animation reuses the same component selection and `max_points` setting, then groups points by time step for each frame
 
 ### 4. Create RGB latent videos from chosen projection components
 
@@ -521,6 +528,7 @@ That means the app can:
 - build plots directly from saved projections
 - choose any valid 2 components for 2D
 - choose any valid 3 components for 3D
+- animate the chosen embedding components across time with a frame slider from `t0` to `tn`
 - reuse PCA or UMAP results without recomputation
 - reuse saved `mlx-vis` projections without recomputation
 - label PCA axes with explained-variance percentages when available

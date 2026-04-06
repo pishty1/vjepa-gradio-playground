@@ -89,6 +89,26 @@ class ProjectionFigureTests(unittest.TestCase):
         self.assertEqual(len(figure.data), 1)
         self.assertEqual(figure.data[0].type, "scatter3d")
 
+    def test_builds_animated_projection_figure_with_time_frames(self) -> None:
+        latent_grid = np.random.default_rng(9).normal(size=(1, 3, 2, 2, 5)).astype(np.float32)
+        bundle = compute_projection_bundle(latent_grid, method="pca", n_components=3)
+        figure = build_projection_figure_from_data(
+            bundle["projection"],
+            bundle["coordinates"],
+            method="pca",
+            component_indices=(0, 1),
+            component_labels=bundle["component_labels"],
+            max_points=50,
+            animate_over_time=True,
+        )
+        self.assertEqual(len(figure.data), 1)
+        self.assertEqual(figure.data[0].type, "scatter")
+        self.assertEqual(len(figure.frames), 3)
+        self.assertTrue(figure.layout.sliders)
+        self.assertEqual(tuple(figure.frames[0].traces), (0,))
+        self.assertEqual(figure.frames[0].name, "t=0")
+        self.assertEqual(len(figure.data[0].x), len(figure.frames[0].data[0].x))
+
 
 class ProjectionArtifactTests(unittest.TestCase):
     def test_round_trips_projection_artifacts(self) -> None:

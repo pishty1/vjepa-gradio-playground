@@ -150,7 +150,7 @@ def extract_latents_step(
         "{}",
         None,
         None,
-        "",
+        None,
         "{}",
         refresh_saved_latent_choices(str(output_prefix)),
     )
@@ -179,10 +179,7 @@ def load_latents_step(
             "{}",
             None,
             None,
-            _format_hint_status(
-                "RGB videos not ready",
-                "Load latents first, then compute or load a projection before rendering videos.",
-            ),
+            None,
             "{}",
             refresh_saved_latent_choices(),
         )
@@ -207,7 +204,7 @@ def load_latents_step(
         "{}",
         None,
         None,
-        "",
+        None,
         "{}",
         refresh_saved_latent_choices(str(output_prefix)),
     )

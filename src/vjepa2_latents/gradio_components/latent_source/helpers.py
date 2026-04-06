@@ -153,13 +153,18 @@ def _format_preflight_status(preflight: dict[str, Any], video_meta: dict[str, An
 
 
 def _format_latent_status(output_prefix: Path, metadata: dict[str, Any], summary: dict[str, Any]) -> str:
+    latent_grid_shape = metadata.get("latent_grid_shape", "unknown")
+    input_tensor_shape = metadata.get("input_tensor_shape", "unknown")
+    raw_token_shape = metadata.get("raw_token_shape")
+    if raw_token_shape is None:
+        raw_token_shape = metadata.get("token_shape", input_tensor_shape)
     return "\n".join(
         [
             "## Latents loaded",
             f"- prefix: `{output_prefix}`",
-            f"- latent grid: `{metadata['latent_grid_shape']}`",
-            f"- input tensor: `{metadata['input_tensor_shape']}`",
-            f"- raw tokens: `{metadata['raw_token_shape']}`",
+            f"- latent grid: `{latent_grid_shape}`",
+            f"- input tensor: `{input_tensor_shape}`",
+            f"- raw tokens: `{raw_token_shape}`",
             f"- patch norm mean/std: `{summary['patch_norm_mean']:.4f}` / `{summary['patch_norm_std']:.4f}`",
             "- next: compute PCA or UMAP with the projection controls.",
         ]

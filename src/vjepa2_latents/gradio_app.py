@@ -189,6 +189,7 @@ def build_demo() -> gr.Blocks:
                 render_section["rgb_r_component_input"],
                 render_section["rgb_g_component_input"],
                 render_section["rgb_b_component_input"],
+                plot_section["plot_max_points_input"],
                 plot_section["plot_output"],
                 plot_section["plot_status_output"],
                 render_section["render_status_output"],
@@ -211,6 +212,11 @@ def build_demo() -> gr.Blocks:
                 render_section["rgb_r_component_input"],
                 render_section["rgb_g_component_input"],
                 render_section["rgb_b_component_input"],
+                plot_section["plot_max_points_input"],
+                plot_section["plot_output"],
+                plot_section["plot_status_output"],
+                render_section["render_status_output"],
+                render_section["render_metadata_output"],
             ],
         )
 
@@ -220,6 +226,7 @@ def build_demo() -> gr.Blocks:
                 projection_state,
                 plot_section["plot_dimensions_input"],
                 plot_section["plot_max_points_input"],
+                plot_section["plot_animate_input"],
                 plot_section["plot_x_component_input"],
                 plot_section["plot_y_component_input"],
                 plot_section["plot_z_component_input"],
