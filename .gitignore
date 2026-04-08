@@ -12,3 +12,5 @@ checkpoints
 .vscode
 .lsp
 .clj-kondo
+.tmp
+.venv
