@@ -5,7 +5,7 @@ from typing import Any
 
 import gradio as gr
 
-from ...gradio_utils import _format_hint_status, _load_latent_metadata, _log_gradio_step, _serialize_json
+from gradio_utils import _format_hint_status, _load_latent_metadata, _log_gradio_step, _serialize_json
 from ..projection import load_saved_latents
 from ..render.video import load_aligned_source_frames
 from .core import (

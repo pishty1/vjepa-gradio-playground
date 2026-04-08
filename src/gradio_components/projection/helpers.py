@@ -5,7 +5,7 @@ from typing import Sequence
 
 import gradio as gr
 
-from ...gradio_utils import NEIGHBOR_TUNED_METHODS
+from gradio_utils import NEIGHBOR_TUNED_METHODS
 from .core import projection_method_display_name
 
 

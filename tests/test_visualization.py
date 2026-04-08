@@ -9,11 +9,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vjepa2_latents.gradio_components.plot import (
+from gradio_components.plot import (
     build_projection_figure,
     build_projection_figure_from_data,
 )
-from vjepa2_latents.gradio_components.projection import (
+from gradio_components.projection import (
     compute_mlx_projection,
     compute_pca_projection,
     compute_projection_bundle,
@@ -23,19 +23,19 @@ from vjepa2_latents.gradio_components.projection import (
     projection_method_display_name,
     save_projection_artifacts,
 )
-from vjepa2_latents.gradio_components.render import (
+from gradio_components.render import (
     _ensure_even_frame_size,
     infer_latent_fps,
     latent_rgb_frames,
     projection_rgb_frames,
     side_by_side_frames,
 )
-from vjepa2_latents.gradio_components.segmentation import (
+from gradio_components.segmentation import (
     annotate_prompt_points,
     knn_binary_segmentation_volume,
     segmentation_mask_frames,
 )
-from vjepa2_latents.gradio_components.tracking import (
+from gradio_components.tracking import (
     annotate_selected_patch,
     cosine_similarity_volume,
     map_click_to_latent_token,
@@ -128,7 +128,7 @@ class ProjectionArtifactTests(unittest.TestCase):
 class MlxProjectionTests(unittest.TestCase):
     def test_missing_mlx_vis_dependency_raises_clear_error(self) -> None:
         features = np.random.default_rng(7).normal(size=(16, 8)).astype(np.float32)
-        with mock.patch("vjepa2_latents.gradio_components.projection.core.has_mlx_vis_support", return_value=False):
+        with mock.patch("gradio_components.projection.core.has_mlx_vis_support", return_value=False):
             with self.assertRaisesRegex(RuntimeError, "mlx-vis"):
                 compute_mlx_projection(features, method="umap_mlx", n_components=2)
 
@@ -146,8 +146,8 @@ class MlxProjectionTests(unittest.TestCase):
         fake_module = type("FakeMlxVis", (), {"TSNE": FakeTSNE})
 
         with (
-            mock.patch("vjepa2_latents.gradio_components.projection.core.has_mlx_vis_support", return_value=True),
-            mock.patch("vjepa2_latents.gradio_components.projection.core.importlib.import_module", return_value=fake_module),
+            mock.patch("gradio_components.projection.core.has_mlx_vis_support", return_value=True),
+            mock.patch("gradio_components.projection.core.importlib.import_module", return_value=fake_module),
         ):
             bundle = compute_projection_bundle(
                 latent_grid,
@@ -326,12 +326,12 @@ class VideoWriteHelpersTests(unittest.TestCase):
     def test_write_video_uses_ffmpeg_h264_yuv420p(self) -> None:
         frames = np.zeros((2, 10, 12, 3), dtype=np.uint8)
 
-        with mock.patch("vjepa2_latents.gradio_components.render.video._resolve_ffmpeg_executable", return_value="ffmpeg"):
-            with mock.patch("vjepa2_latents.gradio_components.render.video.subprocess.run") as run_mock:
+        with mock.patch("gradio_components.render.video._resolve_ffmpeg_executable", return_value="ffmpeg"):
+            with mock.patch("gradio_components.render.video.subprocess.run") as run_mock:
                 run_mock.return_value = mock.Mock(returncode=0, stderr=b"")
                 output = _ensure_even_frame_size(frames)
                 self.assertEqual(output.shape, (2, 10, 12, 3))
-                from vjepa2_latents.gradio_components.render import write_video
+                from gradio_components.render import write_video
 
                 with tempfile.TemporaryDirectory() as temp_dir:
                     video_path = Path(temp_dir) / "test.mp4"

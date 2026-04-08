@@ -12,7 +12,7 @@ from .extractor import (
     probe_video,
     select_frame_indices,
 )
-from ...gradio_utils import _format_hint_status, _log_gradio_step, _serialize_json
+from gradio_utils import _format_hint_status, _log_gradio_step, _serialize_json
 from ..projection import load_saved_latents, summarize_latents
 from .catalog import saved_latent_choices
 from .config import APP_OUTPUT_DIR, CHECKPOINT_DIR

@@ -27,7 +27,7 @@ def build_latent_source_section(*, model_choices: list[tuple[str, str]]) -> dict
 
     with gr.Group(visible=True) as extract_source_group:
         with gr.Row():
-            video_input = gr.Video(label="Input video", sources=["upload"])
+            video_input = gr.Video(label="Input video", sources=["upload"], value=str(DEFAULT_VIDEO) if DEFAULT_VIDEO.exists() else None)
             with gr.Column():
                 model_input = gr.Dropdown(choices=model_choices, value=DEFAULT_MODEL_NAME, label="Model")
                 crop_height_input = gr.Slider(minimum=256, maximum=768, step=128, value=DEFAULT_CROP_HEIGHT, label="Crop height")

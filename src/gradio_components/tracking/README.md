@@ -2,7 +2,7 @@
 
 This document explains the patch similarity / dense tracking part of this workspace from the code outward.
 
-It focuses on the current implementation in `src/vjepa2_latents/gradio_components/tracking/`, how that code is wired into the Gradio app, what data flows through the component, and what the generated tracking video actually represents.
+It focuses on the current implementation in `src/gradio_components/tracking/`, how that code is wired into the Gradio app, what data flows through the component, and what the generated tracking video actually represents.
 
 It is intentionally narrower than the root `README.md` and covers only the patch-similarity tracking workflow.
 
@@ -24,38 +24,38 @@ This is a visualization and exploration tool, not a learned tracker.
 
 ## Folder layout
 
-The tracking-specific code lives in `src/vjepa2_latents/gradio_components/tracking/`:
+The tracking-specific code lives in `src/gradio_components/tracking/`:
 
-- `src/vjepa2_latents/gradio_components/tracking/__init__.py`: lazy package exports for the public tracking API
-- `src/vjepa2_latents/gradio_components/tracking/callbacks.py`: Gradio callback wiring for frame preparation and click handling
-- `src/vjepa2_latents/gradio_components/tracking/core.py`: click-to-token mapping, cosine similarity computation, overlay rendering, annotation, and video export
-- `src/vjepa2_latents/gradio_components/tracking/helpers.py`: tracking-specific status strings and frame-choice labels
-- `src/vjepa2_latents/gradio_components/tracking/ui.py`: the Gradio tab definition
-- `src/vjepa2_latents/gradio_components/tracking/README.md`: this document
+- `src/gradio_components/tracking/__init__.py`: lazy package exports for the public tracking API
+- `src/gradio_components/tracking/callbacks.py`: Gradio callback wiring for frame preparation and click handling
+- `src/gradio_components/tracking/core.py`: click-to-token mapping, cosine similarity computation, overlay rendering, annotation, and video export
+- `src/gradio_components/tracking/helpers.py`: tracking-specific status strings and frame-choice labels
+- `src/gradio_components/tracking/ui.py`: the Gradio tab definition
+- `src/gradio_components/tracking/README.md`: this document
 
 The component also depends on nearby shared modules:
 
-- `src/vjepa2_latents/gradio_app.py`: wires the tracking tab into `build_demo()`
-- `src/vjepa2_latents/gradio_components/projection/core.py`: provides `flatten_latent_grid(...)`
-- `src/vjepa2_latents/gradio_components/render/video.py`: provides source-frame alignment, playback-FPS inference, and MP4 writing
-- `src/vjepa2_latents/gradio_utils.py`: provides generic status formatting, metadata loading, JSON serialization, and console logging helpers
+- `src/gradio_app.py`: wires the tracking tab into `build_demo()`
+- `src/gradio_components/projection/core.py`: provides `flatten_latent_grid(...)`
+- `src/gradio_components/render/video.py`: provides source-frame alignment, playback-FPS inference, and MP4 writing
+- `src/gradio_utils.py`: provides generic status formatting, metadata loading, JSON serialization, and console logging helpers
 
 ## Code map
 
 Main tracking entry points in this repo:
 
-- UI setup: `src/vjepa2_latents/gradio_app.py::build_demo`
-- Tracking tab UI: `src/vjepa2_latents/gradio_components/tracking/ui.py::build_tracking_tab`
-- Tracking frame preparation: `src/vjepa2_latents/gradio_components/tracking/callbacks.py::prepare_tracking_step`
-- Patch click handler: `src/vjepa2_latents/gradio_components/tracking/callbacks.py::select_patch_similarity_step`
-- Click-to-token mapping: `src/vjepa2_latents/gradio_components/tracking/core.py::map_click_to_latent_token`
-- Similarity computation: `src/vjepa2_latents/gradio_components/tracking/core.py::cosine_similarity_volume`
-- Patch annotation: `src/vjepa2_latents/gradio_components/tracking/core.py::annotate_selected_patch`
-- Heatmap overlay rendering: `src/vjepa2_latents/gradio_components/tracking/core.py::similarity_heatmap_frames`
-- Tracking video export: `src/vjepa2_latents/gradio_components/tracking/core.py::create_patch_similarity_video`
-- Shared latent flattening: `src/vjepa2_latents/gradio_components/projection/core.py::flatten_latent_grid`
-- Shared source-frame alignment: `src/vjepa2_latents/gradio_components/render/video.py::load_aligned_source_frames`
-- Shared MP4 writing: `src/vjepa2_latents/gradio_components/render/video.py::write_video`
+- UI setup: `src/gradio_app.py::build_demo`
+- Tracking tab UI: `src/gradio_components/tracking/ui.py::build_tracking_tab`
+- Tracking frame preparation: `src/gradio_components/tracking/callbacks.py::prepare_tracking_step`
+- Patch click handler: `src/gradio_components/tracking/callbacks.py::select_patch_similarity_step`
+- Click-to-token mapping: `src/gradio_components/tracking/core.py::map_click_to_latent_token`
+- Similarity computation: `src/gradio_components/tracking/core.py::cosine_similarity_volume`
+- Patch annotation: `src/gradio_components/tracking/core.py::annotate_selected_patch`
+- Heatmap overlay rendering: `src/gradio_components/tracking/core.py::similarity_heatmap_frames`
+- Tracking video export: `src/gradio_components/tracking/core.py::create_patch_similarity_video`
+- Shared latent flattening: `src/gradio_components/projection/core.py::flatten_latent_grid`
+- Shared source-frame alignment: `src/gradio_components/render/video.py::load_aligned_source_frames`
+- Shared MP4 writing: `src/gradio_components/render/video.py::write_video`
 
 ## UI behavior in the current app
 

@@ -4,7 +4,7 @@ from typing import Any
 
 import gradio as gr
 
-from ...gradio_utils import PCA_MODE_CHOICES, PROJECTION_METHOD_CHOICES
+from gradio_utils import PCA_MODE_CHOICES, PROJECTION_METHOD_CHOICES
 
 
 def build_projection_section(*, mlx_note: str) -> dict[str, Any]:

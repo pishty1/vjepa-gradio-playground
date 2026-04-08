@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import gradio as gr
 
-from .gradio_components.latent_source import (
+from gradio_components.latent_source import (
     DEFAULT_CROP_HEIGHT,
     DEFAULT_CROP_WIDTH,
     DEFAULT_DEVICE,
@@ -19,27 +19,27 @@ from .gradio_components.latent_source import (
     refresh_saved_latent_choices,
     toggle_latent_source_mode,
 )
-from .gradio_components.plot import build_plot_section, build_plot_step, toggle_plot_dimensions
-from .gradio_components.projection import (
+from gradio_components.plot import build_plot_section, build_plot_step, toggle_plot_dimensions
+from gradio_components.projection import (
     build_projection_section,
     compute_projection_step,
     load_projection_step,
     toggle_projection_controls,
 )
-from .gradio_components.render import build_render_section, create_rgb_videos_step
-from .gradio_components.segmentation import (
+from gradio_components.render import build_render_section, create_rgb_videos_step
+from gradio_components.segmentation import (
     build_segmentation_tab,
     prepare_segmentation_step,
     run_segmentation_step,
     select_segmentation_prompt_step,
 )
-from .gradio_components.tracking import (
+from gradio_components.tracking import (
     build_tracking_tab,
     prepare_tracking_step,
     select_patch_similarity_step,
 )
-from .gradio_utils import MODEL_CHOICES
-from .gradio_components.projection import has_mlx_vis_support
+from gradio_utils import MODEL_CHOICES
+from gradio_components.projection import has_mlx_vis_support
 
 
 def build_demo() -> gr.Blocks:

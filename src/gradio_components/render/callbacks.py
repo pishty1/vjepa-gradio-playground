@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ...gradio_utils import _format_hint_status, _load_latent_metadata, _log_gradio_step, _serialize_json
+from gradio_utils import _format_hint_status, _load_latent_metadata, _log_gradio_step, _serialize_json
 from ..projection import load_saved_projection
 from .video import create_visualizations_from_projection
 from .helpers import _format_render_status

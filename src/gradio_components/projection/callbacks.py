@@ -5,7 +5,7 @@ from typing import Any
 
 import gradio as gr
 
-from ...gradio_utils import (
+from gradio_utils import (
     _component_selector_updates,
     _format_hint_status,
     _log_gradio_step,

@@ -4,7 +4,7 @@ from typing import Any
 
 import gradio as gr
 
-from ...gradio_utils import _format_hint_status
+from gradio_utils import _format_hint_status
 
 
 def build_segmentation_tab() -> dict[str, Any]:

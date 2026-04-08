@@ -6,18 +6,18 @@ from typing import Any, Sequence
 
 import gradio as gr
 
-from .gradio_components.latent_source.extractor import MODEL_SPECS, log_step
-from .gradio_components.segmentation.status import (
+from gradio_components.latent_source.extractor import MODEL_SPECS, log_step
+from gradio_components.segmentation.status import (
     _format_segmentation_prompt_status,
     _format_segmentation_ready_status,
     _format_segmentation_result_status,
 )
-from .gradio_components.tracking.helpers import (
+from gradio_components.tracking.helpers import (
     _format_tracking_ready_status,
     _format_tracking_result_status,
     _tracking_frame_choices,
 )
-from .gradio_components.projection import projection_method_display_name
+from gradio_components.projection import projection_method_display_name
 
 MODEL_LABELS = {
     "vit_base_384": "ViT-B/16 · 80M · 384",

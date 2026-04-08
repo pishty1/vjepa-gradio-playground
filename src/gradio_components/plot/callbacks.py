@@ -8,7 +8,7 @@ from typing import Any
 
 from plotly.offline import get_plotlyjs
 
-from ...gradio_utils import _format_hint_status, _load_latent_metadata, _log_gradio_step
+from gradio_utils import _format_hint_status, _load_latent_metadata, _log_gradio_step
 from ..projection import load_saved_projection
 from ..render import load_aligned_source_frames, write_video
 from .core import build_projection_figure_from_data

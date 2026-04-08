@@ -14,7 +14,7 @@ from .config import MODEL_SPECS
 from .utils.logging import log_step
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[5]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 SOURCE_ROOT = WORKSPACE_ROOT / "src"
 
 

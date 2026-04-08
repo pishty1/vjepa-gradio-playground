@@ -2,7 +2,7 @@
 
 This document explains the Video Object Segmentation (VOS) part of this workspace from two angles:
 
-- what the current code in `src/vjepa2_latents/gradio_components/segmentation/` and the related package entry points actually do
+- what the current code in `src/gradio_components/segmentation/` and the related package entry points actually do
 - how that behavior relates to the V-JEPA 2.1 paper
 
 It is intentionally narrower than the root `README.md` and focuses only on the segmentation workflow.
@@ -22,21 +22,21 @@ It currently lets you:
 
 ## Folder layout
 
-The VOS-specific code now lives in `src/vjepa2_latents/gradio_components/segmentation/`:
+The VOS-specific code now lives in `src/gradio_components/segmentation/`:
 
-- `src/vjepa2_latents/gradio_components/segmentation/__init__.py`: segmentation exports
-- `src/vjepa2_latents/gradio_components/segmentation/callbacks.py`: Gradio VOS callback wiring
-- `src/vjepa2_latents/gradio_components/segmentation/core.py`: segmentation dataclass, prompt annotation, propagation, rendering, and video export
-- `src/vjepa2_latents/gradio_components/segmentation/status.py`: VOS-specific status text helpers
-- `src/vjepa2_latents/gradio_components/segmentation/ui.py`: VOS tab UI construction
-- `src/vjepa2_latents/gradio_components/segmentation/README.md`: this document
+- `src/gradio_components/segmentation/__init__.py`: segmentation exports
+- `src/gradio_components/segmentation/callbacks.py`: Gradio VOS callback wiring
+- `src/gradio_components/segmentation/core.py`: segmentation dataclass, prompt annotation, propagation, rendering, and video export
+- `src/gradio_components/segmentation/status.py`: VOS-specific status text helpers
+- `src/gradio_components/segmentation/ui.py`: VOS tab UI construction
+- `src/gradio_components/segmentation/README.md`: this document
 
 The package-level callers remain stable:
 
-- `src/vjepa2_latents/gradio_app.py` still wires the UI
-- `src/vjepa2_latents/visualization.py` still re-exports public visualization helpers
-- `src/vjepa2_latents/video.py` still holds non-VOS video utilities and imports the segmentation helpers for compatibility
-- `src/vjepa2_latents/gradio_utils.py` still exposes the VOS status helpers through imports
+- `src/gradio_app.py` still wires the UI
+- `src/visualization.py` still re-exports public visualization helpers
+- `src/video.py` still holds non-VOS video utilities and imports the segmentation helpers for compatibility
+- `src/gradio_utils.py` still exposes the VOS status helpers through imports
 
 ## Paper reference
 
@@ -50,15 +50,15 @@ The paper referenced for this behavior is:
 
 Main VOS entry points in this repo:
 
-- UI setup: `src/vjepa2_latents/gradio_app.py::build_demo`
-- VOS frame preparation: `src/vjepa2_latents/gradio_components/segmentation/callbacks.py::prepare_segmentation_step`
-- VOS prompt click handling: `src/vjepa2_latents/gradio_components/segmentation/callbacks.py::select_segmentation_prompt_step`
-- VOS run step: `src/vjepa2_latents/gradio_components/segmentation/callbacks.py::run_segmentation_step`
-- Prompt-to-token mapping: `src/vjepa2_latents/video.py::map_click_to_latent_token`
-- Core propagation: `src/vjepa2_latents/gradio_components/segmentation/core.py::knn_binary_segmentation_volume`
-- Mask rendering: `src/vjepa2_latents/gradio_components/segmentation/core.py::segmentation_mask_frames`
-- Video export: `src/vjepa2_latents/gradio_components/segmentation/core.py::create_segmentation_video`
-- VOS status text: `src/vjepa2_latents/gradio_components/segmentation/status.py`
+- UI setup: `src/gradio_app.py::build_demo`
+- VOS frame preparation: `src/gradio_components/segmentation/callbacks.py::prepare_segmentation_step`
+- VOS prompt click handling: `src/gradio_components/segmentation/callbacks.py::select_segmentation_prompt_step`
+- VOS run step: `src/gradio_components/segmentation/callbacks.py::run_segmentation_step`
+- Prompt-to-token mapping: `src/video.py::map_click_to_latent_token`
+- Core propagation: `src/gradio_components/segmentation/core.py::knn_binary_segmentation_volume`
+- Mask rendering: `src/gradio_components/segmentation/core.py::segmentation_mask_frames`
+- Video export: `src/gradio_components/segmentation/core.py::create_segmentation_video`
+- VOS status text: `src/gradio_components/segmentation/status.py`
 
 ## How the current code works
 

@@ -23,27 +23,27 @@ The project no longer depends on a checked-in clone of `facebookresearch/vjepa2`
 
 ### Core package
 
-- `src/vjepa2_latents/gradio_app.py`: builds the full Gradio UI
-- `src/vjepa2_latents/gradio_utils.py`: shared Gradio helpers and status formatting
-- `src/vjepa2_latents/__init__.py`: package-level exports for the main reusable APIs
+- `src/gradio_app.py`: builds the full Gradio UI
+- `src/gradio_utils.py`: shared Gradio helpers and status formatting
+- `src/__init__.py`: package-level exports for the main reusable APIs
 
 ### Latent extraction
 
-- `src/vjepa2_latents/gradio_components/latent_source/`: latent source UI, callbacks, saved-run catalog, and config
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/`: extractor implementation
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/config.py`: model registry, crop parsing, device selection, memory estimates
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/checkpoint.py`: checkpoint download/validation and encoder loading via `torch.hub`
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/video.py`: frame probing, decoding, resize/crop, preprocessing
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/tensor.py`: encoder execution, token reshaping, output serialization
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/pipeline.py`: end-to-end extraction orchestration used by the Gradio workflow and notebooks
+- `src/gradio_components/latent_source/`: latent source UI, callbacks, saved-run catalog, and config
+- `src/gradio_components/latent_source/extractor/`: extractor implementation
+- `src/gradio_components/latent_source/extractor/config.py`: model registry, crop parsing, device selection, memory estimates
+- `src/gradio_components/latent_source/extractor/checkpoint.py`: checkpoint download/validation and encoder loading via `torch.hub`
+- `src/gradio_components/latent_source/extractor/video.py`: frame probing, decoding, resize/crop, preprocessing
+- `src/gradio_components/latent_source/extractor/tensor.py`: encoder execution, token reshaping, output serialization
+- `src/gradio_components/latent_source/extractor/pipeline.py`: end-to-end extraction orchestration used by the Gradio workflow and notebooks
 
 ### Analysis and visualization
 
-- `src/vjepa2_latents/gradio_components/projection/`: projection compute/load helpers and UI
-- `src/vjepa2_latents/gradio_components/plot/`: Plotly figure building
-- `src/vjepa2_latents/gradio_components/render/`: RGB rendering and side-by-side video export
-- `src/vjepa2_latents/gradio_components/tracking/`: patch similarity / dense tracking workflow
-- `src/vjepa2_latents/gradio_components/segmentation/`: sparse-prompt VOS workflow
+- `src/gradio_components/projection/`: projection compute/load helpers and UI
+- `src/gradio_components/plot/`: Plotly figure building
+- `src/gradio_components/render/`: RGB rendering and side-by-side video export
+- `src/gradio_components/tracking/`: patch similarity / dense tracking workflow
+- `src/gradio_components/segmentation/`: sparse-prompt VOS workflow
 
 ### Tests and notebooks
 
@@ -157,8 +157,8 @@ The recent loader fix also adds coverage for the `torch.hub` import-isolation pa
 
 ## Related docs
 
-- `src/vjepa2_latents/gradio_components/segmentation/README.md`: VOS-specific behavior and paper alignment
-- `src/vjepa2_latents/gradio_components/tracking/README.md`: patch similarity / dense tracking details
+- `src/gradio_components/segmentation/README.md`: VOS-specific behavior and paper alignment
+- `src/gradio_components/tracking/README.md`: patch similarity / dense tracking details
 - `README.md`: this single project-level guide
 
 ## Notes and limitations

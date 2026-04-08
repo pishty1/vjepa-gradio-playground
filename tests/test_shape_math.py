@@ -13,7 +13,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vjepa2_latents.gradio_components.latent_source.extractor import (
+from gradio_components.latent_source.extractor import (
     MODEL_SPECS,
     auto_device,
     download_checkpoint_if_needed,
@@ -56,7 +56,7 @@ class ReshapePatchTokensTests(unittest.TestCase):
         self.assertEqual(stripped, 1)
 
     def test_timed_reshape_reports_substep_durations(self) -> None:
-        from vjepa2_latents.gradio_components.latent_source.extractor import reshape_patch_tokens_with_timings
+        from gradio_components.latent_source.extractor import reshape_patch_tokens_with_timings
 
         tokens = torch.randn(1, 8 * 16 * 16, 1024)
         grid, stripped, timings = reshape_patch_tokens_with_timings(
@@ -146,7 +146,7 @@ class AutoDeviceTests(unittest.TestCase):
 class ExtractionEstimateTests(unittest.TestCase):
     def test_estimate_extraction_requirements_reports_high_pressure_for_50_frames(self) -> None:
         with mock.patch(
-            "vjepa2_latents.gradio_components.latent_source.extractor.config.get_mps_memory_info",
+            "gradio_components.latent_source.extractor.config.get_mps_memory_info",
             return_value={
                 "recommended_max_memory": 26 * 1024**3,
                 "current_allocated_memory": 0,
@@ -188,7 +188,7 @@ class CheckpointDownloadTests(unittest.TestCase):
                 torch.save({"ema_encoder": {}}, destination)
 
             with mock.patch(
-                "vjepa2_latents.gradio_components.latent_source.extractor.checkpoint.download_checkpoint",
+                "gradio_components.latent_source.extractor.checkpoint.download_checkpoint",
                 side_effect=fake_download,
             ) as patched:
                 resolved = download_checkpoint_if_needed("vit_base_384", None, checkpoint_dir)
