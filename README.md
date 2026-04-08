@@ -20,7 +20,6 @@ The project no longer depends on a checked-in clone of `facebookresearch/vjepa2`
 ### Entry points
 
 - `app.py`: launches the Gradio app
-- `extract_vjepa2_latents.py`: launches the extractor CLI
 
 ### Core package
 
@@ -36,7 +35,7 @@ The project no longer depends on a checked-in clone of `facebookresearch/vjepa2`
 - `src/vjepa2_latents/gradio_components/latent_source/extractor/checkpoint.py`: checkpoint download/validation and encoder loading via `torch.hub`
 - `src/vjepa2_latents/gradio_components/latent_source/extractor/video.py`: frame probing, decoding, resize/crop, preprocessing
 - `src/vjepa2_latents/gradio_components/latent_source/extractor/tensor.py`: encoder execution, token reshaping, output serialization
-- `src/vjepa2_latents/gradio_components/latent_source/extractor/pipeline.py`: end-to-end extraction orchestration and CLI `main()`
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/pipeline.py`: end-to-end extraction orchestration used by the Gradio workflow and notebooks
 
 ### Analysis and visualization
 
@@ -79,58 +78,23 @@ python -m pip install matplotlib ipympl
 
 ## Quick start
 
-### Dry-run the extractor
-
-This validates preprocessing and latent shape math without downloading weights:
-
-```zsh
-python extract_vjepa2_latents.py --dry-run
-```
-
-### Extract latents from a video
-
-```zsh
-python extract_vjepa2_latents.py \
-  --video testvideo.mp4 \
-  --output-prefix skate_latents \
-  --model vit_large_384
-```
-
-Example variations:
-
-```zsh
-python extract_vjepa2_latents.py \
-  --video testvideo.mp4 \
-  --output-prefix skate_latents_8fps \
-  --model vit_large_384 \
-  --sample-fps 8
-
-python extract_vjepa2_latents.py \
-  --video testvideo.mp4 \
-  --output-prefix skate_latents_cpu \
-  --model vit_large_384 \
-  --device cpu
-
-python extract_vjepa2_latents.py \
-  --video testvideo.mp4 \
-  --output-prefix skate_latents \
-  --model vit_large_384 \
-  --checkpoint-path checkpoints/vjepa2_1_vitl_dist_vitG_384.pt
-```
-
-Artifacts written by the extractor include:
-
-- `<prefix>.npy`
-- `<prefix>.metadata.json`
-- optionally `<prefix>.pt`
-
-## Gradio app
+### Launch the Gradio app
 
 Run the browser UI locally:
 
 ```zsh
 python app.py
 ```
+
+### Use the notebooks
+
+Open `playground.ipynb` for ad hoc extraction and experimentation, and `inspectdata.ipynb` for reviewing saved latent artifacts.
+
+Artifacts created by the extraction workflow include:
+
+- `<prefix>.npy`
+- `<prefix>.metadata.json`
+- optionally `<prefix>.pt`
 
 The app exposes a staged workflow:
 
@@ -153,7 +117,7 @@ The app exposes a staged workflow:
 
 ## Architecture
 
-The UI reuses the same extraction pipeline as the CLI rather than maintaining a separate inference path.
+The UI and notebooks reuse the same extraction pipeline rather than maintaining a separate inference path.
 
 ```text
 browser UI
