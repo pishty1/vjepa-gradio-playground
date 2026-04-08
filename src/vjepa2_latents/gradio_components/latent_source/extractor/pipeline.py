@@ -12,7 +12,6 @@ from .checkpoint import (
     clean_state_dict,
     download_checkpoint,
     download_checkpoint_if_needed,
-    ensure_vendor_imports,
     load_checkpoint_file,
     load_encoder,
     resolve_checkpoint_key,
@@ -127,7 +126,6 @@ def extract_latents(
     *,
     video_path: Path,
     output_prefix: Path,
-    vendor_repo: Path,
     model_name: str,
     checkpoint_path: Path | None,
     checkpoint_dir: Path,
@@ -145,7 +143,6 @@ def extract_latents(
 
     video_path = video_path.resolve()
     output_prefix = output_prefix.resolve()
-    vendor_repo = vendor_repo.resolve()
     checkpoint_dir = checkpoint_dir.resolve()
 
     if not video_path.exists():
@@ -234,7 +231,6 @@ def extract_latents(
         model_name=model_name,
         num_frames=num_frames,
         checkpoint_path=resolved_checkpoint,
-        vendor_repo=vendor_repo,
         device=device,
         timings_out=encoder_setup_timings,
     )
@@ -325,7 +321,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Extract V-JEPA 2.1 latent grids from a video clip")
     parser.add_argument("video", type=Path, help="Input video path")
     parser.add_argument("output_prefix", type=Path, help="Output path prefix, e.g. outputs/clip")
-    parser.add_argument("--vendor-repo", type=Path, default=Path("vendor/vjepa2"), help="Path to facebookresearch/vjepa2 checkout")
     parser.add_argument("--model", dest="model_name", default="vit_base_384", choices=sorted(MODEL_SPECS), help="Encoder variant")
     parser.add_argument("--checkpoint", type=Path, default=None, help="Optional explicit checkpoint path")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints"), help="Where downloaded checkpoints are cached")
@@ -347,7 +342,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = extract_latents(
         video_path=args.video,
         output_prefix=args.output_prefix,
-        vendor_repo=args.vendor_repo,
         model_name=args.model_name,
         checkpoint_path=args.checkpoint,
         checkpoint_dir=args.checkpoint_dir,

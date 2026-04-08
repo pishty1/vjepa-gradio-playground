@@ -18,6 +18,8 @@ from vjepa2_latents.gradio_components.latent_source.extractor import (
     auto_device,
     download_checkpoint_if_needed,
     estimate_extraction_requirements,
+    isolate_torch_hub_imports,
+    load_encoder,
     log_timing_summary,
     normalize_crop_size,
     parse_crop_size,
@@ -195,6 +197,51 @@ class CheckpointDownloadTests(unittest.TestCase):
             self.assertEqual(patched.call_count, 1)
             loaded = torch.load(resolved, map_location="cpu", weights_only=False)
             self.assertIn("ema_encoder", loaded)
+
+
+class EncoderLoadTests(unittest.TestCase):
+    def test_isolate_torch_hub_imports_hides_local_app_module_and_restores_state(self) -> None:
+        original_sys_path = list(sys.path)
+        fake_local_app = object()
+        sys.modules["app"] = fake_local_app
+
+        try:
+            with isolate_torch_hub_imports():
+                self.assertNotIn(Path.cwd().resolve(), [Path(path or ".").resolve() for path in sys.path])
+                self.assertNotIn(ROOT.resolve(), [Path(path or ".").resolve() for path in sys.path])
+                self.assertNotIn((ROOT / "src").resolve(), [Path(path or ".").resolve() for path in sys.path])
+                self.assertNotIn("app", sys.modules)
+            self.assertIs(sys.modules["app"], fake_local_app)
+            self.assertEqual(sys.path, original_sys_path)
+        finally:
+            sys.modules.pop("app", None)
+            sys.path[:] = original_sys_path
+
+    def test_load_encoder_uses_torch_hub_loader(self) -> None:
+        fake_encoder = torch.nn.Linear(4, 4, bias=False)
+        checkpoint = {"ema_encoder": fake_encoder.state_dict()}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkpoint_path = Path(temp_dir) / "checkpoint.pt"
+            torch.save(checkpoint, checkpoint_path)
+
+            with mock.patch(
+                "torch.hub.load",
+                return_value=(fake_encoder, object()),
+            ) as patched_hub_load:
+                loaded_encoder = load_encoder(
+                    model_name="vit_base_384",
+                    num_frames=16,
+                    checkpoint_path=checkpoint_path,
+                    device=torch.device("cpu"),
+                )
+
+        self.assertIs(loaded_encoder, fake_encoder)
+        self.assertIsInstance(loaded_encoder, torch.nn.Module)
+        patched_hub_load.assert_called_once()
+        self.assertEqual(patched_hub_load.call_args.args[:2], ("facebookresearch/vjepa2", "vjepa2_1_vit_base_384"))
+        self.assertEqual(patched_hub_load.call_args.kwargs["pretrained"], False)
+        self.assertEqual(patched_hub_load.call_args.kwargs["num_frames"], 16)
 
 
 class OutputSaveTests(unittest.TestCase):

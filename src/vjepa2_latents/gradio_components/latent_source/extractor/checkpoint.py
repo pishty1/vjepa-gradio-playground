@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import importlib
-import importlib.machinery
+import contextlib
 import os
 import sys
 import time
-import types
 import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
@@ -16,6 +14,36 @@ from .config import MODEL_SPECS
 from .utils.logging import log_step
 
 
+WORKSPACE_ROOT = Path(__file__).resolve().parents[5]
+SOURCE_ROOT = WORKSPACE_ROOT / "src"
+
+
+def _resolve_sys_path_entry(entry: str) -> Path | None:
+    if not entry:
+        return Path.cwd().resolve()
+    try:
+        return Path(entry).resolve()
+    except OSError:
+        return None
+
+
+@contextlib.contextmanager
+def isolate_torch_hub_imports() -> Any:
+    original_sys_path = list(sys.path)
+    blocked_entries = {WORKSPACE_ROOT.resolve(), SOURCE_ROOT.resolve(), Path.cwd().resolve()}
+    sys.path[:] = [entry for entry in original_sys_path if _resolve_sys_path_entry(entry) not in blocked_entries]
+
+    previous_app_module = sys.modules.pop("app", None)
+    try:
+        yield
+    finally:
+        sys.path[:] = original_sys_path
+        if previous_app_module is not None:
+            sys.modules["app"] = previous_app_module
+        else:
+            sys.modules.pop("app", None)
+
+
 def clean_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     cleaned: dict[str, torch.Tensor] = {}
     for key, value in state_dict.items():
@@ -23,33 +51,6 @@ def clean_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Ten
         key = key.replace("backbone.", "")
         cleaned[key] = value
     return cleaned
-
-
-def ensure_vendor_imports(vendor_repo: Path) -> None:
-    vendor_repo = vendor_repo.resolve()
-    if not vendor_repo.exists():
-        raise FileNotFoundError(
-            f"Expected the official repo at {vendor_repo}. Clone facebookresearch/vjepa2 there first."
-        )
-    vendor_path = str(vendor_repo)
-    if vendor_path not in sys.path:
-        sys.path.insert(0, vendor_path)
-
-    vendor_app_dir = vendor_repo / "app"
-    if vendor_app_dir.exists():
-        current_app = sys.modules.get("app")
-        current_app_paths = [str(path) for path in getattr(current_app, "__path__", [])]
-        if str(vendor_app_dir) not in current_app_paths:
-            vendor_app_package = types.ModuleType("app")
-            vendor_app_package.__path__ = [str(vendor_app_dir)]
-            vendor_app_package.__package__ = "app"
-            vendor_app_package.__spec__ = importlib.machinery.ModuleSpec(
-                name="app",
-                loader=None,
-                is_package=True,
-            )
-            vendor_app_package.__spec__.submodule_search_locations = [str(vendor_app_dir)]
-            sys.modules["app"] = vendor_app_package
 
 
 def load_checkpoint_file(checkpoint_path: Path) -> dict[str, Any]:
@@ -119,42 +120,37 @@ def download_checkpoint_if_needed(model_name: str, checkpoint_path: Path | None,
     return target_path
 
 
+def load_hub_encoder(*, model_name: str, num_frames: int) -> torch.nn.Module:
+    spec = MODEL_SPECS[model_name]
+    log_step(f"Loading {spec.hub_name} from torch.hub")
+    with isolate_torch_hub_imports():
+        loaded = torch.hub.load(
+            "facebookresearch/vjepa2",
+            spec.hub_name,
+            pretrained=False,
+            num_frames=num_frames,
+            trust_repo=True,
+        )
+    encoder = loaded[0] if isinstance(loaded, tuple) else loaded
+    if not isinstance(encoder, torch.nn.Module):
+        raise RuntimeError(f"torch.hub returned an unexpected object for {spec.hub_name}: {type(encoder)!r}")
+    return encoder
+
+
 def load_encoder(
     *,
     model_name: str,
     num_frames: int,
     checkpoint_path: Path,
-    vendor_repo: Path,
     device: torch.device,
     timings_out: dict[str, float] | None = None,
 ) -> torch.nn.Module:
     load_encoder_start = time.perf_counter()
 
-    vendor_import_start = time.perf_counter()
-    ensure_vendor_imports(vendor_repo)
-    vendor_import_seconds = time.perf_counter() - vendor_import_start
-
-    import_model_start = time.perf_counter()
-    vit_encoder = importlib.import_module("app.vjepa_2_1.models.vision_transformer")
-    import_model_seconds = time.perf_counter() - import_model_start
-
     spec = MODEL_SPECS[model_name]
-    log_step(f"Building encoder {model_name} for {num_frames} frames on {device}")
+
     build_encoder_start = time.perf_counter()
-    encoder = vit_encoder.__dict__[spec.arch_name](
-        img_size=(spec.native_resolution, spec.native_resolution),
-        patch_size=16,
-        num_frames=num_frames,
-        tubelet_size=2,
-        use_sdpa=True,
-        use_SiLU=False,
-        wide_SiLU=True,
-        uniform_power=False,
-        use_rope=True,
-        img_temporal_dim_size=1,
-        interpolate_rope=True,
-        modality_embedding=True,
-    )
+    encoder = load_hub_encoder(model_name=model_name, num_frames=num_frames)
     build_encoder_seconds = time.perf_counter() - build_encoder_start
 
     log_step(f"Loading checkpoint weights from {checkpoint_path}")
@@ -187,9 +183,7 @@ def load_encoder(
         timings_out.clear()
         timings_out.update(
             {
-                "ensure_vendor_imports_seconds": vendor_import_seconds,
-                "import_model_module_seconds": import_model_seconds,
-                "build_encoder_module_seconds": build_encoder_seconds,
+                "load_torch_hub_encoder_seconds": build_encoder_seconds,
                 "load_checkpoint_file_seconds": load_checkpoint_seconds,
                 "resolve_checkpoint_key_seconds": resolve_key_seconds,
                 "clean_state_dict_seconds": clean_state_seconds,

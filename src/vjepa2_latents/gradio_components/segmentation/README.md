@@ -5,7 +5,7 @@ This document explains the Video Object Segmentation (VOS) part of this workspac
 - what the current code in `src/vjepa2_latents/gradio_components/segmentation/` and the related package entry points actually do
 - how that behavior relates to the V-JEPA 2.1 paper
 
-It is intentionally narrower than `README_GRADIO.md` and focuses only on the segmentation workflow.
+It is intentionally narrower than the root `README.md` and focuses only on the segmentation workflow.
 
 ## Scope
 

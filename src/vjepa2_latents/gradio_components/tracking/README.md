@@ -4,7 +4,7 @@ This document explains the patch similarity / dense tracking part of this worksp
 
 It focuses on the current implementation in `src/vjepa2_latents/gradio_components/tracking/`, how that code is wired into the Gradio app, what data flows through the component, and what the generated tracking video actually represents.
 
-It is intentionally narrower than `README_GRADIO.md` and covers only the patch-similarity tracking workflow.
+It is intentionally narrower than the root `README.md` and covers only the patch-similarity tracking workflow.
 
 ## Scope
 

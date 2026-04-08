@@ -15,7 +15,7 @@ from .extractor import (
 from ...gradio_utils import _format_hint_status, _log_gradio_step, _serialize_json
 from ..projection import load_saved_latents, summarize_latents
 from .catalog import saved_latent_choices
-from .config import APP_OUTPUT_DIR, CHECKPOINT_DIR, VENDOR_REPO
+from .config import APP_OUTPUT_DIR, CHECKPOINT_DIR
 from .helpers import (
     _clean_latent_metadata_for_ui,
     _create_session_dir,
@@ -98,7 +98,6 @@ def extract_latents_step(
         result = extract_latents(
             video_path=video_path,
             output_prefix=output_prefix,
-            vendor_repo=VENDOR_REPO,
             model_name=model_name,
             checkpoint_path=None,
             checkpoint_dir=CHECKPOINT_DIR,

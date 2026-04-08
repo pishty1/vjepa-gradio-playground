@@ -1,50 +1,62 @@
-# V-JEPA 2.1 latent extraction
+# V-JEPA 2.1 latent explorer
 
-This workspace extracts patch-level V-JEPA 2.1 latents from `testvideo.mp4` into a structured tensor with shape `[batch, time, height, width, embed_dim]`, then provides a notebook to inspect and visualize those latents.
+This repo extracts patch-level V-JEPA 2.1 latents from video, saves them as reusable artifacts, and provides a Gradio app for projection, rendering, tracking, and promptable segmentation.
 
-## Current status
+The project no longer depends on a checked-in clone of `facebookresearch/vjepa2`; encoder construction now happens through `torch.hub`, while checkpoints can be auto-downloaded or loaded from `checkpoints/`.
 
-The full end-to-end pipeline has been implemented and verified in this workspace.
+## What this project does
 
-- official repo cloned into `vendor/vjepa2`
-- extractor implemented in `src/vjepa2_latents/extractor.py`
-- CLI entrypoint added in `extract_vjepa2_latents.py`
-- tests added in `tests/test_shape_math.py`
-- notebook inspector added in `inspectdata.ipynb`
-- Hugging Face / Gradio app added in `app.py`
-- notebook now includes UMAP projection and side-by-side video export
-- successful latent extraction completed for `testvideo.mp4`
+- extract V-JEPA 2.1 latent grids with shape `[batch, time, height, width, embed_dim]`
+- estimate memory pressure before extraction, especially for Apple `mps`
+- save reusable `.npy` and `.metadata.json` artifacts for later analysis
+- compute PCA, `umap-learn`, and optional `mlx-vis` projections
+- build interactive 2D and 3D Plotly views of the latent space
+- render RGB latent videos and side-by-side source/latent videos
+- probe dense patch similarity from a clicked frame location
+- run sparse-prompt foreground/background video object segmentation
 
-## What the extractor does
+## Repository layout
 
-- reads exactly `16` frames from `testvideo.mp4`
-- optionally samples frames at a target FPS, or uses consecutive frames
-- resizes the short side to `256`, then center-crops to `256x256`
-- normalizes pixels with ImageNet mean and std
-- loads the frozen V-JEPA 2.1 encoder from the official codebase
-- runs the encoder and reshapes flat patch tokens into a latent grid
-- saves results as `.pt`, `.npy`, and `.metadata.json`
-- prints progress logs for long stages like checkpoint load and encoder forward pass
+### Entry points
 
-## Important note about resolution
+- `app.py`: launches the Gradio app
+- `extract_vjepa2_latents.py`: launches the extractor CLI
 
-Official V-JEPA 2.1 checkpoints are released at `384` resolution, not `256`. This extractor still supports a `256x256` crop because the official encoder uses RoPE-enabled variable-size inference. That detail is recorded in `skate_latents.metadata.json`.
+### Core package
 
-## Files
+- `src/vjepa2_latents/gradio_app.py`: builds the full Gradio UI
+- `src/vjepa2_latents/gradio_utils.py`: shared Gradio helpers and status formatting
+- `src/vjepa2_latents/__init__.py`: package-level exports for the main reusable APIs
 
-- `extract_vjepa2_latents.py`: CLI entrypoint
-- `src/vjepa2_latents/extractor.py`: extraction pipeline and model loading
-- `tests/test_shape_math.py`: unit tests for frame indexing and token reshaping
-- `inspectdata.ipynb`: notebook for summary stats and latent visualizations
-- `app.py`: Gradio entrypoint for a Hugging Face Spaces-style browser UI
-- `src/vjepa2_latents/gradio_app.py`: app wiring for upload, extraction, and visualization
-- `src/vjepa2_latents/visualization.py`: latent PCA plotting and RGB/side-by-side video rendering helpers
-- `vendor/vjepa2`: official upstream clone from `facebookresearch/vjepa2`
-- `checkpoints/`: cached checkpoints downloaded by the extractor
+### Latent extraction
 
-## Environment
+- `src/vjepa2_latents/gradio_components/latent_source/`: latent source UI, callbacks, saved-run catalog, and config
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/`: extractor implementation
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/config.py`: model registry, crop parsing, device selection, memory estimates
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/checkpoint.py`: checkpoint download/validation and encoder loading via `torch.hub`
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/video.py`: frame probing, decoding, resize/crop, preprocessing
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/tensor.py`: encoder execution, token reshaping, output serialization
+- `src/vjepa2_latents/gradio_components/latent_source/extractor/pipeline.py`: end-to-end extraction orchestration and CLI `main()`
 
-Create a Python environment and install the local requirements.
+### Analysis and visualization
+
+- `src/vjepa2_latents/gradio_components/projection/`: projection compute/load helpers and UI
+- `src/vjepa2_latents/gradio_components/plot/`: Plotly figure building
+- `src/vjepa2_latents/gradio_components/render/`: RGB rendering and side-by-side video export
+- `src/vjepa2_latents/gradio_components/tracking/`: patch similarity / dense tracking workflow
+- `src/vjepa2_latents/gradio_components/segmentation/`: sparse-prompt VOS workflow
+
+### Tests and notebooks
+
+- `tests/test_shape_math.py`: extractor, timing, checkpoint, and shape coverage
+- `tests/test_gradio_app.py`: Gradio workflow coverage
+- `tests/test_visualization.py`: projection, rendering, tracking, and visualization coverage
+- `inspectdata.ipynb`: notebook exploration of saved latent artifacts
+- `playground.ipynb`: ad hoc experimentation notebook
+
+## Setup
+
+Create a virtual environment and install the project dependencies:
 
 ```zsh
 /opt/homebrew/bin/python3 -m venv .venv
@@ -53,45 +65,29 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-If you want to use the vendored repo directly as a package too, install it in editable mode after the requirements are present.
+Optional notebook extras:
 
 ```zsh
-python -m pip install -e vendor/vjepa2
+python -m pip install matplotlib ipympl
 ```
 
-The local environment used during validation also includes `matplotlib`, `ipympl`, and `umap-learn` for notebook plotting and UMAP projections.
+`requirements.txt` already includes:
 
-If you want the full notebook feature set used in the current inspector, install those extras too:
+- `torch`, `torchvision`, `numpy`, `opencv-python`, `einops`, `timm`
+- `gradio`, `plotly`, `umap-learn`
+- `mlx` and `mlx-vis` on Apple Silicon only
 
-```zsh
-python -m pip install matplotlib ipympl umap-learn
-```
+## Quick start
 
-For the browser UI / Hugging Face Spaces interface, install the app dependencies in `requirements.txt` as well. That file now includes `gradio` and `plotly`.
+### Dry-run the extractor
 
-## Quick checks
-
-Run the lightweight unit tests:
-
-```zsh
-python -m unittest tests/test_shape_math.py
-```
-
-Run a preprocessing-only dry run without downloading weights:
+This validates preprocessing and latent shape math without downloading weights:
 
 ```zsh
 python extract_vjepa2_latents.py --dry-run
 ```
 
-The dry run should report:
-
-- input shape: `[1, 3, 16, 256, 256]`
-- latent shape: `[1, 8, 16, 16, 1024]`
-- stripped tokens: `0`
-
-## Extract latents
-
-Default extraction from `testvideo.mp4`:
+### Extract latents from a video
 
 ```zsh
 python extract_vjepa2_latents.py \
@@ -100,7 +96,7 @@ python extract_vjepa2_latents.py \
   --model vit_large_384
 ```
 
-Sample at `8` fps instead of taking consecutive frames:
+Example variations:
 
 ```zsh
 python extract_vjepa2_latents.py \
@@ -108,11 +104,13 @@ python extract_vjepa2_latents.py \
   --output-prefix skate_latents_8fps \
   --model vit_large_384 \
   --sample-fps 8
-```
 
-Use a custom local checkpoint instead of auto-downloading:
+python extract_vjepa2_latents.py \
+  --video testvideo.mp4 \
+  --output-prefix skate_latents_cpu \
+  --model vit_large_384 \
+  --device cpu
 
-```zsh
 python extract_vjepa2_latents.py \
   --video testvideo.mp4 \
   --output-prefix skate_latents \
@@ -120,118 +118,90 @@ python extract_vjepa2_latents.py \
   --checkpoint-path checkpoints/vjepa2_1_vitl_dist_vitG_384.pt
 ```
 
-Force CPU if you want to avoid Apple `mps` during debugging:
+Artifacts written by the extractor include:
 
-```zsh
-python extract_vjepa2_latents.py \
-  --video testvideo.mp4 \
-  --output-prefix skate_latents_cpu \
-  --model vit_large_384 \
-  --device cpu
-```
+- `<prefix>.npy`
+- `<prefix>.metadata.json`
+- optionally `<prefix>.pt`
 
-## Browser UI
+## Gradio app
 
-The workspace now includes a simple Hugging Face Spaces-style interface built with `gradio`.
-
-It supports:
-
-- uploading a video or selecting the bundled `testvideo.mp4` example
-- running the existing V-JEPA 2.1 latent-extraction pipeline from the browser
-- rendering an interactive `Plotly` PCA view of the latent space
-- generating a latent RGB video from PCA-projected patch embeddings
-- generating a side-by-side comparison video of source frames and latent RGB frames
-- showing clear status updates and the saved run metadata
-
-Run it locally with:
+Run the browser UI locally:
 
 ```zsh
 python app.py
 ```
 
-Then open the local Gradio URL in your browser.
+The app exposes a staged workflow:
 
-## Completed extraction result
+1. estimate extraction fit for the chosen device
+2. extract new latents or load saved latent artifacts
+3. compute or load projections
+4. build interactive 2D or 3D plots
+5. create latent RGB videos and side-by-side comparison videos
+6. run click-based patch similarity tracking
+7. run foreground/background prompt segmentation
 
-The default extraction has already been run successfully on `testvideo.mp4`.
+### Current UI sections
 
-- video metadata: `204` frames at `25.000` fps
-- source resolution: `4096x2160`
-- extracted frame range: `0..15`
-- input tensor shape: `[1, 3, 16, 256, 256]`
-- raw token shape: `[1, 2048, 1024]`
-- latent shape: `[1, 8, 16, 16, 1024]`
-- stripped leading tokens: `0`
-- device used: `mps`
+- **Latent source**: extract or load latents, inspect metadata, reuse saved runs
+- **Projection**: compute PCA, `UMAP`, or optional `mlx-vis` reducers
+- **Plot**: explore chosen components in 2D or 3D Plotly views
+- **Render**: build latent RGB videos and side-by-side outputs
+- **Tracking**: click a patch and export cosine-similarity heatmap videos
+- **Segmentation**: click one foreground and one background prompt and export overlay videos
 
-Files written by that run:
+## Architecture
 
-- `skate_latents.pt`
-- `skate_latents.npy`
-- `skate_latents.metadata.json`
+The UI reuses the same extraction pipeline as the CLI rather than maintaining a separate inference path.
 
-For the default `16 x 256 x 256` clip, the grid math is:
+```text
+browser UI
+  -> Gradio Blocks app
+  -> estimate_limits_step(...) [optional]
+  -> extract_latents_step(...) or load_latents_step(...)
+  -> compute_projection_step(...) or load_projection_step(...)
+  -> build_plot_step(...)
+  -> create_rgb_videos_step(...)
+  -> prepare_tracking_step(...)
+  -> select_patch_similarity_step(...)
+  -> prepare_segmentation_step(...)
+  -> select_segmentation_prompt_step(...)
+  -> run_segmentation_step(...)
+```
 
-- `time = 16 / 2 = 8`
-- `height = 256 / 16 = 16`
-- `width = 256 / 16 = 16`
+## Resolution and model notes
 
-So the expected output shape is:
+- official V-JEPA 2.1 checkpoints are published at `384` resolution
+- the extractor also supports rectangular crops and smaller crops for experimentation
+- inference still works because the upstream encoder supports RoPE-based variable-size inference
+- the UI defaults to `vit_base_384` and uses `mps` on macOS when available
 
-- ViT-L: `[1, 8, 16, 16, 1024]`
-- ViT-g: `[1, 8, 16, 16, 1408]`
+## Validation
 
-## Notebook inspection workflow
+Useful focused checks in this workspace:
 
-The notebook `inspectdata.ipynb` is set up and has already been executed successfully.
+```zsh
+python -m unittest -v tests.test_shape_math
+python -m unittest -v tests.test_gradio_app
+python -m unittest -v tests.test_visualization
+python -m unittest -v tests.test_gradio_app tests.test_visualization tests.test_shape_math
+python -c "from app import build_demo; demo = build_demo(); print(type(demo).__name__)"
+```
 
-It currently includes:
+The recent loader fix also adds coverage for the `torch.hub` import-isolation path used to avoid collisions with the local `app.py` launcher.
 
-- loading `skate_latents.npy` or `skate_latents.pt`
-- loading `skate_latents.metadata.json`
-- printing tensor shape, dtype, frame indices, and norm summary
-- plotting latent norm heatmaps over all `8` latent time steps
-- projecting the latent vectors into RGB using the first `3` principal components
-- projecting the latent vectors with `UMAP` and mapping those coordinates into RGB + intensity views
-- generating a labeled side-by-side comparison video between source frames and latent-space UMAP frames
-- plotting cosine-similarity maps against the center patch from latent frame `0`
+## Related docs
 
-Observed notebook summary from the extracted tensor:
+- `src/vjepa2_latents/gradio_components/segmentation/README.md`: VOS-specific behavior and paper alignment
+- `src/vjepa2_latents/gradio_components/tracking/README.md`: patch similarity / dense tracking details
+- `README.md`: this single project-level guide
 
-- latent shape: `(1, 8, 16, 16, 1024)`
-- latent dtype: `float32`
-- patch norm mean: `62.6178`
-- patch norm std: `5.5419`
-- patch norm min: `41.8771`
-- patch norm max: `73.5242`
-- PCA explained variance: `PC1=0.1154`, `PC2=0.0703`, `PC3=0.0611`
+## Notes and limitations
 
-Open the notebook in VS Code and run it interactively if you want to inspect or extend the views.
-
-Recent notebook-generated artifacts include:
-
-- `latent_space_pca_smooth_384.mp4`
-- `latent_space_side_by_side_384.mp4`
-- `latent_space_umap_384.mp4`
-- `latent_space_umap_side_by_side_384.mp4`
-
-## Validation completed
-
-The following checks have already passed in this workspace:
-
-- `python3 -m py_compile extract_vjepa2_latents.py src/vjepa2_latents/extractor.py tests/test_shape_math.py`
-- `python3 -m unittest tests/test_shape_math.py`
-- `python3 extract_vjepa2_latents.py --dry-run`
-- `python3 extract_vjepa2_latents.py --video testvideo.mp4 --output-prefix skate_latents --model vit_large_384`
-
-Focused checks for the browser UI can be run with:
-
-- `python3 -m unittest tests/test_shape_math.py tests/test_visualization.py`
-
-## Notes and warnings
-
-- the first real extraction run may appear slow because checkpoint loading and the transformer forward pass are heavy
-- the extractor now prints `[vjepa2] ...` progress messages to make long-running stages visible
-- `timm` emits a deprecation warning from upstream imports; this does not block extraction
-- PyTorch emits a `sdp_kernel` future warning from upstream internals; this also does not block extraction
-- `umap-learn` may print an `n_jobs` warning when `random_state` is set; this does not block the notebook outputs
+- the first full extraction can be slow because checkpoint load and encoder forward pass are heavy
+- the app processes one video at a time
+- `ffmpeg` must be available, or `imageio-ffmpeg` must provide a compatible encoder
+- RGB outputs are analytic latent visualizations, not reconstructions
+- `timm` and some upstream PyTorch internals may emit non-fatal warnings during load/inference
+- optional `mlx-vis` reducers are available only on Apple Silicon with the matching dependencies installed

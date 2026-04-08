@@ -5,7 +5,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_VIDEO = ROOT / "testvideo.mp4"
-VENDOR_REPO = ROOT / "vendor" / "vjepa2"
 CHECKPOINT_DIR = ROOT / "checkpoints"
 APP_OUTPUT_DIR = ROOT / ".gradio_outputs"
 DEFAULT_DEVICE = "mps" if platform.system() == "Darwin" else "auto"

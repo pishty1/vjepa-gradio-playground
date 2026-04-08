@@ -41,6 +41,7 @@ def parse_crop_size(value: str) -> int | tuple[int, int]:
 @dataclass(frozen=True)
 class ModelSpec:
     arch_name: str
+    hub_name: str
     checkpoint_keys: tuple[str, ...]
     checkpoint_url: str
     embed_dim: int
@@ -51,6 +52,7 @@ class ModelSpec:
 MODEL_SPECS: dict[str, ModelSpec] = {
     "vit_base_384": ModelSpec(
         arch_name="vit_base",
+        hub_name="vjepa2_1_vit_base_384",
         checkpoint_keys=("ema_encoder", "target_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitb_dist_vitG_384.pt",
         embed_dim=768,
@@ -59,6 +61,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     ),
     "vit_large_384": ModelSpec(
         arch_name="vit_large",
+        hub_name="vjepa2_1_vit_large_384",
         checkpoint_keys=("ema_encoder", "target_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitl_dist_vitG_384.pt",
         embed_dim=1024,
@@ -67,6 +70,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     ),
     "vit_giant_384": ModelSpec(
         arch_name="vit_giant_xformers",
+        hub_name="vjepa2_1_vit_giant_384",
         checkpoint_keys=("target_encoder", "ema_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitg_384.pt",
         embed_dim=1408,
@@ -75,6 +79,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     ),
     "vit_gigantic_384": ModelSpec(
         arch_name="vit_gigantic_xformers",
+        hub_name="vjepa2_1_vit_gigantic_384",
         checkpoint_keys=("target_encoder", "ema_encoder", "encoder"),
         checkpoint_url="https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitG_384.pt",
         embed_dim=1664,

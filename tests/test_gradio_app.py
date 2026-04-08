@@ -59,7 +59,7 @@ class GradioMetadataCleanupTests(unittest.TestCase):
                 "total_seconds": 0.027461707999464124,
             },
             "encoder_setup": {
-                "ensure_vendor_imports_seconds": 0.00019,
+                "load_torch_hub_encoder_seconds": 0.00019,
                 "total_seconds": 4.331428250006866,
             },
             "major_phases": {
