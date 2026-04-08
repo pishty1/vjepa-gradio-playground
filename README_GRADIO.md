@@ -3,6 +3,7 @@
 This document describes the current Gradio app in this workspace, the staged latent-space workflow it exposes, and the component-local modules that support it.
 
 For a VOS-only explanation grounded in both the current code and the V-JEPA 2.1 paper, see `src/vjepa2_latents/gradio_components/segmentation/README.md`.
+For a patch-similarity tracking-only explanation, see `src/vjepa2_latents/gradio_components/tracking/README.md`.
 
 ## Purpose
 
