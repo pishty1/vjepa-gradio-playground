@@ -50,7 +50,6 @@ The project no longer depends on a checked-in clone of `facebookresearch/vjepa2`
 - `tests/test_shape_math.py`: extractor, timing, checkpoint, and shape coverage
 - `tests/test_gradio_app.py`: Gradio workflow coverage
 - `tests/test_visualization.py`: projection, rendering, tracking, and visualization coverage
-- `inspectdata.ipynb`: notebook exploration of saved latent artifacts
 - `playground.ipynb`: ad hoc experimentation notebook
 
 ## Setup
@@ -88,7 +87,7 @@ python app.py
 
 ### Use the notebooks
 
-Open `playground.ipynb` for ad hoc extraction and experimentation, and `inspectdata.ipynb` for reviewing saved latent artifacts.
+Open `playground.ipynb` for ad hoc extraction and experimentation.
 
 Artifacts created by the extraction workflow include:
 
