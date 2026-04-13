@@ -10,6 +10,7 @@ This repo extracts patch-level V-JEPA 2.1 latents from video, saves them as reus
 - compute PCA, `umap-learn`, and optional `mlx-vis` projections
 - build interactive 2D and 3D Plotly views of the latent space
 - render RGB latent videos and side-by-side source/latent videos
+- compare overlapping tumbling windows from two encoder runs with an animated latent-difference heatmap
 - probe dense patch similarity from a clicked frame location
 - run sparse-prompt foreground/background video object segmentation
 
@@ -100,8 +101,9 @@ The app exposes a staged workflow:
 3. compute or load projections
 4. build interactive 2D or 3D plots
 5. create latent RGB videos and side-by-side comparison videos
-6. run click-based patch similarity tracking
-7. run foreground/background prompt segmentation
+6. compare two overlapping tumbling windows from different start frames
+7. run click-based patch similarity tracking
+8. run foreground/background prompt segmentation
 
 ### Current UI sections
 
@@ -109,6 +111,7 @@ The app exposes a staged workflow:
 - **Projection**: compute PCA, `UMAP`, or optional `mlx-vis` reducers
 - **Plot**: explore chosen components in 2D or 3D Plotly views
 - **Render**: build latent RGB videos and side-by-side outputs
+- **Tumbling Window Comparison**: compare overlapping encoder windows and animate the latent difference across shared time slices
 - **Tracking**: click a patch and export cosine-similarity heatmap videos
 - **Segmentation**: click one foreground and one background prompt and export overlay videos
 
@@ -124,6 +127,7 @@ browser UI
   -> compute_projection_step(...) or load_projection_step(...)
   -> build_plot_step(...)
   -> create_rgb_videos_step(...)
+  -> compare_tumbling_windows_step(...)
   -> prepare_tracking_step(...)
   -> select_patch_similarity_step(...)
   -> prepare_segmentation_step(...)

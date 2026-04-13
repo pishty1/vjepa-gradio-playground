@@ -20,6 +20,7 @@ from gradio_app import (
     DEFAULT_MODEL_NAME,
     _clean_latent_metadata_for_ui,
     build_plot_step,
+    compare_tumbling_windows_step,
     create_rgb_videos_step,
     compute_projection_step,
     prepare_tracking_step,
@@ -316,6 +317,60 @@ class GradioMetadataCleanupTests(unittest.TestCase):
         self.assertIn("RGB videos created", status)
         self.assertEqual(video_path, str(dummy_artifacts.side_by_side_video_path))
         self.assertIn('"display_fps": 24.0', payload_json)
+
+    def test_compare_tumbling_windows_step_returns_metrics_and_heatmap_html(self) -> None:
+        video_path = Path("/tmp/example.mp4")
+        left_latent = np.zeros((1, 4, 1, 1, 2), dtype=np.float32)
+        right_latent = np.zeros((1, 4, 1, 1, 2), dtype=np.float32)
+        left_latent[0, 2, 0, 0] = np.array([1.0, 0.0], dtype=np.float32)
+        left_latent[0, 3, 0, 0] = np.array([0.0, 1.0], dtype=np.float32)
+        right_latent[0, 0, 0, 0] = np.array([1.0, 0.0], dtype=np.float32)
+        right_latent[0, 1, 0, 0] = np.array([0.0, 1.0], dtype=np.float32)
+
+        with (
+            patch("gradio_components.tumbling_window.callbacks._resolve_video_path", return_value=video_path),
+            patch(
+                "gradio_components.tumbling_window.callbacks.probe_video",
+                return_value={"frame_count": 120, "fps": 24.0, "width": 384, "height": 384},
+            ),
+            patch("gradio_components.tumbling_window.callbacks.download_checkpoint_if_needed", return_value=Path("/tmp/mock.pt")),
+            patch("gradio_components.tumbling_window.callbacks.load_encoder", return_value=object()),
+            patch(
+                "gradio_components.tumbling_window.callbacks._run_window",
+                side_effect=[
+                    {
+                        "frame_indices": list(range(10, 18)),
+                        "raw_tokens_shape": [1, 4, 2],
+                        "latent_grid": left_latent,
+                        "encoder_seconds": 0.111,
+                        "tokens_stripped": 0,
+                    },
+                    {
+                        "frame_indices": list(range(14, 22)),
+                        "raw_tokens_shape": [1, 4, 2],
+                        "latent_grid": right_latent,
+                        "encoder_seconds": 0.222,
+                        "tokens_stripped": 1,
+                    },
+                ],
+            ),
+        ):
+            status, heatmap_html, metadata_json = compare_tumbling_windows_step(
+                video_file=str(video_path),
+                model_name="vit_base_384",
+                crop_height=384,
+                crop_width=384,
+                device_name="cpu",
+                start_frame=10,
+                overlap_time_slices=2,
+                window_frames=8,
+            )
+
+        self.assertIn("Tumbling-window comparison ready", status)
+        self.assertIn("mean `1.000000`", status)
+        self.assertIn("iframe", heatmap_html)
+        self.assertIn('"requested_overlap_time_slices": 2', metadata_json)
+        self.assertIn('"right_start": 14', metadata_json)
 
     def test_toggle_projection_controls_shows_pca_and_umap_groups(self) -> None:
         umap_update, pca_update = toggle_projection_controls("PCA")

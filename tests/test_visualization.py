@@ -41,6 +41,11 @@ from gradio_components.tracking import (
     map_click_to_latent_token,
     similarity_heatmap_frames,
 )
+from gradio_components.tumbling_window import (
+    build_tumbling_window_heatmap_figure,
+    compare_overlapping_latent_windows,
+    derive_tumbling_window_ranges,
+)
 
 
 class PcaProjectionTests(unittest.TestCase):
@@ -239,6 +244,53 @@ class PatchSimilarityTests(unittest.TestCase):
         self.assertGreater(hotspot_delta, background_delta)
         self.assertEqual(annotated.shape, overlay[0].shape)
         self.assertFalse(np.array_equal(annotated, overlay[0]))
+
+
+class TumblingWindowTests(unittest.TestCase):
+    def test_derives_tumbling_window_ranges_from_overlap_steps(self) -> None:
+        ranges = derive_tumbling_window_ranges(
+            start_frame=50,
+            window_frames=20,
+            overlap_latent_steps=1,
+            tubelet_size=2,
+            available_frames=200,
+        )
+
+        self.assertEqual(ranges.left_start, 50)
+        self.assertEqual(ranges.right_start, 68)
+        self.assertEqual(ranges.overlap_start_frame, 68)
+        self.assertEqual(ranges.overlap_end_frame, 69)
+        self.assertEqual(ranges.overlap_frames, 2)
+
+    def test_compare_overlapping_latent_windows_reports_similarity_metrics(self) -> None:
+        left_latent = np.zeros((1, 4, 1, 1, 2), dtype=np.float32)
+        right_latent = np.zeros((1, 4, 1, 1, 2), dtype=np.float32)
+        left_latent[0, 2, 0, 0] = np.array([1.0, 0.0], dtype=np.float32)
+        left_latent[0, 3, 0, 0] = np.array([0.0, 1.0], dtype=np.float32)
+        right_latent[0, 0, 0, 0] = np.array([1.0, 0.0], dtype=np.float32)
+        right_latent[0, 1, 0, 0] = np.array([0.0, 1.0], dtype=np.float32)
+
+        result = compare_overlapping_latent_windows(
+            left_latent,
+            right_latent,
+            left_start=0,
+            right_start=4,
+            tubelet_size=2,
+        )
+
+        self.assertTrue(result["comparison"]["allclose_overlapping"])
+        self.assertEqual(result["comparison"]["overlap_latent_steps"], 2)
+        self.assertAlmostEqual(result["comparison"]["mean_token_cosine_similarity_overlapping"], 1.0)
+        self.assertEqual(result["difference_overlap"].shape, (1, 2, 1, 1, 2))
+
+    def test_build_tumbling_window_heatmap_figure_animates_time_slices(self) -> None:
+        difference_overlap = np.arange(1 * 2 * 2 * 3 * 4, dtype=np.float32).reshape(1, 2, 2, 3, 4)
+
+        figure = build_tumbling_window_heatmap_figure(difference_overlap)
+
+        self.assertEqual(figure.data[0].type, "heatmap")
+        self.assertEqual(len(figure.frames), 2)
+        self.assertTrue(figure.layout.sliders)
 
     def test_knn_binary_segmentation_volume_separates_foreground_and_background(self) -> None:
         latent_grid = np.array(

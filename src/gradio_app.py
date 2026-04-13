@@ -33,6 +33,11 @@ from gradio_components.segmentation import (
     run_segmentation_step,
     select_segmentation_prompt_step,
 )
+from gradio_components.tumbling_window import (
+    build_tumbling_window_tab,
+    compare_tumbling_windows_step,
+    sync_overlap_time_slice_control,
+)
 from gradio_components.tracking import (
     build_tracking_tab,
     prepare_tracking_step,
@@ -68,6 +73,7 @@ def build_demo() -> gr.Blocks:
         render_section = build_render_section()
 
         with gr.Tabs():
+            tumbling_window_tab = build_tumbling_window_tab()
             tracking_tab = build_tracking_tab()
             segmentation_tab = build_segmentation_tab()
 
@@ -96,6 +102,14 @@ def build_demo() -> gr.Blocks:
             fn=toggle_plot_dimensions,
             inputs=[plot_section["plot_dimensions_input"]],
             outputs=[plot_section["plot_z_component_input"]],
+        )
+        tumbling_window_tab["tumbling_window_frames_input"].change(
+            fn=sync_overlap_time_slice_control,
+            inputs=[
+                tumbling_window_tab["tumbling_window_frames_input"],
+                tumbling_window_tab["tumbling_overlap_time_slices_input"],
+            ],
+            outputs=[tumbling_window_tab["tumbling_overlap_time_slices_input"]],
         )
 
         latent_source["estimate_button"].click(
@@ -249,6 +263,27 @@ def build_demo() -> gr.Blocks:
                 render_section["side_by_side_output"],
                 render_section["render_metadata_output"],
             ],
+        )
+
+        tumbling_window_tab["compare_tumbling_windows_button"].click(
+            fn=compare_tumbling_windows_step,
+            inputs=[
+                latent_source["video_input"],
+                latent_source["model_input"],
+                latent_source["crop_height_input"],
+                latent_source["crop_width_input"],
+                latent_source["device_input"],
+                tumbling_window_tab["tumbling_start_frame_input"],
+                tumbling_window_tab["tumbling_overlap_time_slices_input"],
+                tumbling_window_tab["tumbling_window_frames_input"],
+            ],
+            outputs=[
+                tumbling_window_tab["tumbling_status_output"],
+                tumbling_window_tab["tumbling_heatmap_output"],
+                tumbling_window_tab["tumbling_metadata_output"],
+            ],
+            trigger_mode="once",
+            concurrency_limit=1,
         )
 
         tracking_tab["prepare_tracking_button"].click(
