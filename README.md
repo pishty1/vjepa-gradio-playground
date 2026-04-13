@@ -2,8 +2,6 @@
 
 This repo extracts patch-level V-JEPA 2.1 latents from video, saves them as reusable artifacts, and provides a Gradio app for projection, rendering, tracking, and promptable segmentation.
 
-The project no longer depends on a checked-in clone of `facebookresearch/vjepa2`; encoder construction now happens through `torch.hub`, while checkpoints can be auto-downloaded or loaded from `checkpoints/`.
-
 ## What this project does
 
 - extract V-JEPA 2.1 latent grids with shape `[batch, time, height, width, embed_dim]`
